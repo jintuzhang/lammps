@@ -354,9 +354,9 @@ std::cout << " " << std::endl;
     virial[0] = vir[0][0][0].item<double>();
     virial[1] = vir[0][1][1].item<double>();
     virial[2] = vir[0][2][2].item<double>();
-    virial[3] = 0.5*(vir[0][2][1].item<double>() + vir[0][1][2].item<double>());
+    virial[3] = 0.5*(vir[0][1][0].item<double>() + vir[0][0][1].item<double>());
     virial[4] = 0.5*(vir[0][2][0].item<double>() + vir[0][0][2].item<double>());
-    virial[5] = 0.5*(vir[0][1][0].item<double>() + vir[0][0][1].item<double>());
+    virial[5] = 0.5*(vir[0][2][1].item<double>() + vir[0][1][2].item<double>());
   }
 
   // mace site virials
