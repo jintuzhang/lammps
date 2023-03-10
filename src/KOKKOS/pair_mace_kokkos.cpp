@@ -89,6 +89,13 @@ void PairMACEKokkos<DeviceType>::compute(int eflag, int vflag)
 {
   ev_init(eflag,vflag,0);
 
+  atomKK->sync(execution_space,X_MASK|F_MASK|TYPE_MASK|TAG_MASK);
+
+  NeighListKokkos<DeviceType>* k_list = static_cast<NeighListKokkos<DeviceType>*>(list);
+  auto d_numneigh = k_list->d_numneigh;
+  auto d_neighbors = k_list->d_neighbors;
+  auto d_ilist = k_list->d_ilist;
+
   if (atom->nlocal != list->inum) error->all(FLERR, "ERROR: nlocal != inum.");
   if (domain_decomposition) {
     if (atom->nghost != list->gnum) error->all(FLERR, "ERROR: nghost != gnum.");
@@ -109,6 +116,7 @@ void PairMACEKokkos<DeviceType>::compute(int eflag, int vflag)
 //    d_vatom = k_vatom.view<DeviceType>();
 //  }
 
+  int nlocal = atom->nlocal;
   auto r_max_squared = this->r_max_squared;
   auto h0 = domain->h[0];
   auto h1 = domain->h[1];
@@ -123,21 +131,17 @@ void PairMACEKokkos<DeviceType>::compute(int eflag, int vflag)
   auto hinv4 = domain->h_inv[4];
   auto hinv5 = domain->h_inv[5];
 
-  auto k_lammps_atomic_numbers = Kokkos::View<long*>("k_lammps_atomic_numbers",lammps_atomic_numbers.size());
+  auto k_lammps_atomic_numbers = Kokkos::View<long*,DeviceType>("k_lammps_atomic_numbers",lammps_atomic_numbers.size());
   auto k_lammps_atomic_numbers_mirror = Kokkos::create_mirror_view(k_lammps_atomic_numbers);
   for (int i=0; i<lammps_atomic_numbers.size(); ++i) {
-    k_lammps_atomic_numbers(i) = lammps_atomic_numbers[i];
+    k_lammps_atomic_numbers_mirror(i) = lammps_atomic_numbers[i];
   }
-  auto k_mace_atomic_numbers = Kokkos::View<long*>("k_mace_atomic_numbers",mace_atomic_numbers.size());
+  auto k_mace_atomic_numbers = Kokkos::View<long*,DeviceType>("k_mace_atomic_numbers",mace_atomic_numbers.size());
   auto k_mace_atomic_numbers_mirror = Kokkos::create_mirror_view(k_mace_atomic_numbers);
   for (int i=0; i<lammps_atomic_numbers.size(); ++i) {
-    k_mace_atomic_numbers(i) = mace_atomic_numbers[i];
+    k_mace_atomic_numbers_mirror(i) = mace_atomic_numbers[i];
   }
   auto mace_atomic_numbers_size = mace_atomic_numbers.size();
-
-//  auto k_positions = Kokkos::View<double*[3],Kokkos::LayoutRight,DeviceType>("k_positions", n_nodes);
-//  Kokkos::vector<int64_t> lammps_atomic_numbers = this->lammps_atomic_numbers;
-//  Kokkos::vector<int64_t> mace_atomic_numbers = this->mace_atomic_numbers;
 
   // atom map
   auto map_style = atom->map_style;
@@ -145,7 +149,6 @@ void PairMACEKokkos<DeviceType>::compute(int eflag, int vflag)
   auto k_map_hash = atomKK->k_map_hash;
   k_map_array.template sync<DeviceType>();
 
-  atomKK->sync(execution_space,X_MASK|F_MASK|TYPE_MASK|TAG_MASK);
 
   auto x = atomKK->k_x.view<DeviceType>();
 //  c_x = atomKK->k_x.view<DeviceType>();
@@ -155,11 +158,6 @@ void PairMACEKokkos<DeviceType>::compute(int eflag, int vflag)
 //  int nlocal = atom->nlocal;
 //  int nall = atom->nlocal + atom->nghost;
 
-  NeighListKokkos<DeviceType>* k_list = static_cast<NeighListKokkos<DeviceType>*>(list);
-  auto d_numneigh = k_list->d_numneigh;
-  auto d_neighbors = k_list->d_neighbors;
-  auto d_ilist = k_list->d_ilist;
-  //inum = list->inum;
 
   // ----- positions -----
   int n_nodes;
@@ -179,11 +177,13 @@ void PairMACEKokkos<DeviceType>::compute(int eflag, int vflag)
     k_positions(i,2) = x(i,2);
   });
   auto positions = torch::from_blob(
-    k_positions.data(), {n_nodes,3}, torch_float_dtype);
+    k_positions.data(),
+    {n_nodes,3},
+    torch::TensorOptions().dtype(torch_float_dtype).device(torch::kCUDA));
 
   // ----- cell -----
   // TODO: how to use kokkos here?
-  auto cell = torch::zeros({3,3}, torch_float_dtype);
+  auto cell = torch::zeros({3,3}, torch::TensorOptions().dtype(torch_float_dtype).device(torch::kCUDA));
   cell[0][0] = h0;
   cell[0][1] = 0.0;
   cell[0][2] = 0.0;
@@ -198,11 +198,11 @@ void PairMACEKokkos<DeviceType>::compute(int eflag, int vflag)
   // count total number of edges
   auto k_n_edges_vec = Kokkos::View<long*,DeviceType>("k_n_edges_vec", n_nodes);
   Kokkos::parallel_for(n_nodes, KOKKOS_LAMBDA (const int ii) {
-    const int i = d_ilist[ii];
+    const int i = d_ilist(ii);
     const X_FLOAT xtmp = x(i,0);
     const X_FLOAT ytmp = x(i,1);
     const X_FLOAT ztmp = x(i,2);
-    const int jnum = d_numneigh[i];
+    const int jnum = d_numneigh(i);
     for (int jj=0; jj<jnum; ++jj) {
       int j = d_neighbors(i,jj);
       j &= NEIGHMASK;
@@ -222,12 +222,12 @@ void PairMACEKokkos<DeviceType>::compute(int eflag, int vflag)
   // make first_edge vector to help with parallelizing following loop
   auto k_first_edge = Kokkos::View<long*,DeviceType>("k_first_edge", n_nodes);  // initialized to zero
   Kokkos::parallel_for(n_nodes-1, KOKKOS_LAMBDA(const int ii) {
-    k_first_edge[ii+1] = k_first_edge(ii) + k_n_edges_vec(ii);
+    k_first_edge(ii+1) = k_first_edge(ii) + k_n_edges_vec(ii);
   });
   // fill edge_index and unit_shifts tensors
-  Kokkos::View<long**> k_edge_index("k_edge_index", 2, n_edges);
-  Kokkos::View<double*[3]> k_unit_shifts("k_unit_shifts", n_edges);
-  Kokkos::View<double*[3]> k_shifts("k_shifts", n_edges);
+  auto k_edge_index = Kokkos::View<long**,Kokkos::LayoutRight,DeviceType>("k_edge_index", 2, n_edges);
+  auto k_unit_shifts = Kokkos::View<double*[3],Kokkos::LayoutRight,DeviceType>("k_unit_shifts", n_edges);
+  auto k_shifts = Kokkos::View<double*[3],Kokkos::LayoutRight,DeviceType>("k_shifts", n_edges);
   if (domain_decomposition) {
 
 //          if (domain_decomposition) {
@@ -236,11 +236,11 @@ void PairMACEKokkos<DeviceType>::compute(int eflag, int vflag)
   } else {
 
     Kokkos::parallel_for(n_nodes, KOKKOS_LAMBDA(const int ii) {
-      const int i = d_ilist[ii];
+      const int i = d_ilist(ii);
       const X_FLOAT xtmp = x(i,0);
       const X_FLOAT ytmp = x(i,1);
       const X_FLOAT ztmp = x(i,2);
-      const int jnum = d_numneigh[i];
+      const int jnum = d_numneigh(i);
       int k = k_first_edge(ii);
       for (int jj=0; jj<jnum; ++jj) {
         int j = d_neighbors(i,jj);
@@ -249,7 +249,6 @@ void PairMACEKokkos<DeviceType>::compute(int eflag, int vflag)
         const X_FLOAT dely = ytmp - x(j,1);
         const X_FLOAT delz = ztmp - x(j,2);
         const X_FLOAT rsq = delx*delx + dely*dely + delz*delz;
-
         if (rsq < r_max_squared) {
           k_edge_index(0,k) = i;
           //int j_local = atom->map(tag(j));
@@ -272,17 +271,26 @@ void PairMACEKokkos<DeviceType>::compute(int eflag, int vflag)
       }
     });
   }
-  auto edge_index = torch::from_blob(k_edge_index.data(), {2,n_edges}, torch::dtype(torch::kInt64));
-  auto unit_shifts = torch::from_blob(k_unit_shifts.data(), {n_edges,3}, torch_float_dtype);
-  auto shifts = torch::from_blob(k_shifts.data(), {n_edges,3}, torch_float_dtype);
+  auto edge_index = torch::from_blob(
+    k_edge_index.data(),
+    {2,n_edges},
+    torch::TensorOptions().dtype(torch::kInt64).device(torch::kCUDA));
+  auto unit_shifts = torch::from_blob(
+    k_unit_shifts.data(),
+    {n_edges,3},
+    torch::TensorOptions().dtype(torch_float_dtype).device(torch::kCUDA));
+  auto shifts = torch::from_blob(
+    k_shifts.data(),
+    {n_edges,3},
+    torch::TensorOptions().dtype(torch_float_dtype).device(torch::kCUDA));
 
   // ----- node_attrs -----
   // node_attrs is one-hot encoding for atomic numbers
-  int n_node_feats = mace_atomic_numbers.size();
-  Kokkos::View<double**> k_node_attrs("k_node_attrs", n_nodes, n_node_feats);
+  int n_node_feats = mace_atomic_numbers_size;
+  auto k_node_attrs = Kokkos::View<double**,Kokkos::LayoutRight,DeviceType>("k_node_attrs", n_nodes, n_node_feats);
   Kokkos::parallel_for(n_nodes, KOKKOS_LAMBDA(const int ii) {
-    const int i = d_ilist[ii];
-    const int lammps_type = type[i];
+    const int i = d_ilist(ii);
+    const int lammps_type = type(i);
     int t = -1;
     for (int j=0; j<mace_atomic_numbers_size; ++j) {
       if (k_mace_atomic_numbers(j)==k_lammps_atomic_numbers(lammps_type-1)) {
@@ -292,40 +300,45 @@ void PairMACEKokkos<DeviceType>::compute(int eflag, int vflag)
     //if (t==-1) error->all(FLERR, "ERROR: problem converting lammps_type to mace_type.");
     k_node_attrs(i,t-1) = 1.0;
   });
-  auto node_attrs = torch::from_blob(k_node_attrs.data(), {n_nodes,n_node_feats}, torch_float_dtype);
+  auto node_attrs = torch::from_blob(
+    k_node_attrs.data(),
+    {n_nodes, n_node_feats},
+    torch::TensorOptions().dtype(torch_float_dtype).device(torch::kCUDA));
 
-//  // ----- mask for ghost -----
-//  Kokkos::View<bool*> k_mask("k_mask", n_nodes);
-//  Kokkos::parallel_for(atom->nlocal, KOKKOS_LAMBDA(const int ii) {
-//    const int i = d_ilist[ii];
-//    k_mask(i) = true;
-//  });
-//  auto mask = torch::from_blob(k_mask.data(), n_nodes, torch::dtype(torch::kBool));
-//
-//  auto batch = torch::zeros({n_nodes}, torch::dtype(torch::kInt64));
-//  auto energy = torch::empty({1}, torch_float_dtype);
-//  auto forces = torch::empty({n_nodes,3}, torch_float_dtype);
-//  auto ptr = torch::empty({2}, torch::dtype(torch::kInt64));
-//  auto weight = torch::empty({1}, torch_float_dtype);
-//  ptr[0] = 0;
-//  ptr[1] = n_nodes;
-//  weight[0] = 1.0;
-//
-//std::cout << "packing the input" << std::endl;
-//
-//  // pack the input, call the model, extract the output
-//  c10::Dict<std::string, torch::Tensor> input;
-//  input.insert("batch", batch);
-//  input.insert("cell", cell);
-//  input.insert("edge_index", edge_index);
-//  input.insert("energy", energy);
-//  input.insert("forces", forces);
-//  input.insert("node_attrs", node_attrs);
-//  input.insert("positions", positions);
-//  input.insert("ptr", ptr);
-//  input.insert("shifts", shifts);
-//  input.insert("unit_shifts", unit_shifts);
-//  input.insert("weight", weight);
+  // ----- mask for ghost -----
+  Kokkos::View<bool*,DeviceType> k_mask("k_mask", n_nodes);
+  Kokkos::parallel_for(nlocal, KOKKOS_LAMBDA(const int ii) {
+    const int i = d_ilist(ii);
+    k_mask(i) = true;
+  });
+  auto mask = torch::from_blob(
+    k_mask.data(),
+    n_nodes,
+    torch::TensorOptions().dtype(torch::kBool).device(torch::kCUDA));
+
+  // TODO: add device?
+  auto batch = torch::zeros({n_nodes}, torch::TensorOptions().dtype(torch::kInt64).device(torch::kCUDA));
+  auto energy = torch::empty({1}, torch::TensorOptions().dtype(torch_float_dtype).device(torch::kCUDA));
+  auto forces = torch::empty({n_nodes,3}, torch::TensorOptions().dtype(torch_float_dtype).device(torch::kCUDA));
+  auto ptr = torch::empty({2}, torch::TensorOptions().dtype(torch::kInt64).device(torch::kCUDA));
+  auto weight = torch::empty({1}, torch::TensorOptions().dtype(torch_float_dtype).device(torch::kCUDA));
+  ptr[0] = 0;
+  ptr[1] = n_nodes;
+  weight[0] = 1.0;
+
+  // pack the input, call the model, extract the output
+  c10::Dict<std::string, torch::Tensor> input;
+  input.insert("batch", batch);
+  input.insert("cell", cell);
+  input.insert("edge_index", edge_index);
+  input.insert("energy", energy);
+  input.insert("forces", forces);
+  input.insert("node_attrs", node_attrs);
+  input.insert("positions", positions);
+  input.insert("ptr", ptr);
+  input.insert("shifts", shifts);
+  input.insert("unit_shifts", unit_shifts);
+  input.insert("weight", weight);
 ////std::cout << "batch" << batch << std::endl;
 ////std::cout << "cell" << cell << std::endl;
 ////std::cout << "edge_index" << edge_index << std::endl;
@@ -338,8 +351,8 @@ void PairMACEKokkos<DeviceType>::compute(int eflag, int vflag)
 ////std::cout << "unit_shifts" << unit_shifts << std::endl;
 ////std::cout << "weight" << weight << std::endl;
 ////std::cout << "mask" << mask << std::endl;
-//  auto output = model.forward({input, mask, true, true, false}).toGenericDict();
-//
+  auto output = model.forward({input, mask, true, true, false}).toGenericDict();
+
 ////std::cout << "energy: " << output.at("energy").toTensor() << std::endl;
 ////std::cout << "node_energy: " << output.at("node_energy").toTensor() << std::endl;
 //
