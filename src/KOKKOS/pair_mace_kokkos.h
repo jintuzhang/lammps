@@ -27,8 +27,9 @@ PairStyle(mace/kk/host,PairMACEKokkos<LMPHostType>);
 #ifndef LMP_PAIR_MACE_KOKKOS_H
 #define LMP_PAIR_MACE_KOKKOS_H
 
-#include "pair_kokkos.h"
 #include "pair_mace.h"
+#include "kokkos_type.h"
+#include "pair_kokkos.h"
 #include "neigh_list_kokkos.h"
 
 namespace LAMMPS_NS {
@@ -38,7 +39,7 @@ class PairMACEKokkos : public PairMACE {
 
  public:
 
-  //enum {EnabledNeighFlags=FULL|HALFTHREAD|HALF};
+  enum {EnabledNeighFlags=FULL|HALFTHREAD|HALF};
   typedef DeviceType device_type;
   typedef ArrayTypes<DeviceType> AT;
   PairMACEKokkos(class LAMMPS *);
@@ -70,6 +71,23 @@ class PairMACEKokkos : public PairMACE {
                        "Hf", "Ta",  "W", "Re", "Os", "Ir", "Pt", "Au", "Hg", "Tl", "Pb", "Bi", "Po", "At", "Rn",
      "Fr", "Ra", "Ac", "Th", "Pa",  "U", "Np", "Pu", "Am", "Cm", "Bk", "Cf", "Es", "Fm", "Md", "No", "Lr",
                        "Rf", "Db", "Sg", "Bh", "Hs", "Mt", "Ds", "Rg", "Cn", "Nh", "Fl", "Mc", "Lv", "Ts", "Og"};
+
+
+  // kokkos stuff
+  int host_flag;
+  int neighflag;
+  //typename AT::t_x_array_randomread x;
+  typename AT::t_x_array c_x;
+  typename AT::t_f_array f;
+  typename AT::t_int_1d_randomread type;
+
+  
+  //Kokkos::View<double*[3], DeviceType> k_positions;
+
+  typedef Kokkos::DualView<F_FLOAT**, DeviceType> tdual_fparams;
+  tdual_fparams k_cutsq;
+  typedef Kokkos::View<F_FLOAT**, DeviceType> t_fparams;
+  t_fparams d_cutsq;
 
 };
 }    // namespace LAMMPS_NS
