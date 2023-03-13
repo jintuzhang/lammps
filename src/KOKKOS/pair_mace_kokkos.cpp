@@ -134,12 +134,12 @@ std::cout << "ghost gnum " << atom->nghost << " " << list->gnum << std::endl;
   auto hinv4 = domain->h_inv[4];
   auto hinv5 = domain->h_inv[5];
 
-  auto k_lammps_atomic_numbers = Kokkos::View<long*,DeviceType>("k_lammps_atomic_numbers",lammps_atomic_numbers.size());
+  auto k_lammps_atomic_numbers = Kokkos::View<int64_t*,DeviceType>("k_lammps_atomic_numbers",lammps_atomic_numbers.size());
   auto k_lammps_atomic_numbers_mirror = Kokkos::create_mirror_view(k_lammps_atomic_numbers);
   for (int i=0; i<lammps_atomic_numbers.size(); ++i) {
     k_lammps_atomic_numbers_mirror(i) = lammps_atomic_numbers[i];
   }
-  auto k_mace_atomic_numbers = Kokkos::View<long*,DeviceType>("k_mace_atomic_numbers",mace_atomic_numbers.size());
+  auto k_mace_atomic_numbers = Kokkos::View<int64_t*,DeviceType>("k_mace_atomic_numbers",mace_atomic_numbers.size());
   auto k_mace_atomic_numbers_mirror = Kokkos::create_mirror_view(k_mace_atomic_numbers);
   for (int i=0; i<lammps_atomic_numbers.size(); ++i) {
     k_mace_atomic_numbers_mirror(i) = mace_atomic_numbers[i];
@@ -180,11 +180,11 @@ std::cout << "ghost gnum " << atom->nghost << " " << list->gnum << std::endl;
   auto positions = torch::from_blob(
     k_positions.data(),
     {n_nodes,3},
-    torch::TensorOptions().dtype(torch_float_dtype).device(torch::kCUDA));
+    torch::TensorOptions().dtype(torch_float_dtype).device(device));
 
   // ----- cell -----
   // TODO: how to use kokkos here?
-  auto cell = torch::zeros({3,3}, torch::TensorOptions().dtype(torch_float_dtype).device(torch::kCUDA));
+  auto cell = torch::zeros({3,3}, torch::TensorOptions().dtype(torch_float_dtype).device(device));
   cell[0][0] = h0;
   cell[0][1] = 0.0;
   cell[0][2] = 0.0;
@@ -197,7 +197,7 @@ std::cout << "ghost gnum " << atom->nghost << " " << list->gnum << std::endl;
 
   // ----- edge_index and unit_shifts -----
   // count total number of edges
-  auto k_n_edges_vec = Kokkos::View<long*,DeviceType>("k_n_edges_vec", n_nodes);
+  auto k_n_edges_vec = Kokkos::View<int64_t*,DeviceType>("k_n_edges_vec", n_nodes);
   Kokkos::parallel_for(n_nodes, KOKKOS_LAMBDA (const int ii) {
     const int i = d_ilist(ii);
     const double xtmp = x(i,0);
@@ -221,12 +221,12 @@ std::cout << "ghost gnum " << atom->nghost << " " << list->gnum << std::endl;
     n_edges += k_n_edges_vec(ii);
   }, n_edges);
   // make first_edge vector to help with parallelizing following loop
-  auto k_first_edge = Kokkos::View<long*,DeviceType>("k_first_edge", n_nodes);  // initialized to zero
+  auto k_first_edge = Kokkos::View<int64_t*,DeviceType>("k_first_edge", n_nodes);  // initialized to zero
   Kokkos::parallel_for(n_nodes-1, KOKKOS_LAMBDA(const int ii) {
     k_first_edge(ii+1) = k_first_edge(ii) + k_n_edges_vec(ii);
   });
   // fill edge_index and unit_shifts tensors
-  auto k_edge_index = Kokkos::View<long**,Kokkos::LayoutRight,DeviceType>("k_edge_index", 2, n_edges);
+  auto k_edge_index = Kokkos::View<int64_t**,Kokkos::LayoutRight,DeviceType>("k_edge_index", 2, n_edges);
   auto k_unit_shifts = Kokkos::View<double*[3],Kokkos::LayoutRight,DeviceType>("k_unit_shifts", n_edges);
   auto k_shifts = Kokkos::View<double*[3],Kokkos::LayoutRight,DeviceType>("k_shifts", n_edges);
 
@@ -295,15 +295,15 @@ std::cout << "ghost gnum " << atom->nghost << " " << list->gnum << std::endl;
   auto edge_index = torch::from_blob(
     k_edge_index.data(),
     {2,n_edges},
-    torch::TensorOptions().dtype(torch::kInt64).device(torch::kCUDA));
+    torch::TensorOptions().dtype(torch::kInt64).device(device));
   auto unit_shifts = torch::from_blob(
     k_unit_shifts.data(),
     {n_edges,3},
-    torch::TensorOptions().dtype(torch_float_dtype).device(torch::kCUDA));
+    torch::TensorOptions().dtype(torch_float_dtype).device(device));
   auto shifts = torch::from_blob(
     k_shifts.data(),
     {n_edges,3},
-    torch::TensorOptions().dtype(torch_float_dtype).device(torch::kCUDA));
+    torch::TensorOptions().dtype(torch_float_dtype).device(device));
 
   // ----- node_attrs -----
   // node_attrs is one-hot encoding for atomic numbers
@@ -324,7 +324,7 @@ std::cout << "ghost gnum " << atom->nghost << " " << list->gnum << std::endl;
   auto node_attrs = torch::from_blob(
     k_node_attrs.data(),
     {n_nodes, n_node_feats},
-    torch::TensorOptions().dtype(torch_float_dtype).device(torch::kCUDA));
+    torch::TensorOptions().dtype(torch_float_dtype).device(device));
 
   // ----- mask for ghost -----
   Kokkos::View<bool*,DeviceType> k_mask("k_mask", n_nodes);
@@ -335,14 +335,14 @@ std::cout << "ghost gnum " << atom->nghost << " " << list->gnum << std::endl;
   auto mask = torch::from_blob(
     k_mask.data(),
     n_nodes,
-    torch::TensorOptions().dtype(torch::kBool).device(torch::kCUDA));
+    torch::TensorOptions().dtype(torch::kBool).device(device));
 
   // TODO: add device?
-  auto batch = torch::zeros({n_nodes}, torch::TensorOptions().dtype(torch::kInt64).device(torch::kCUDA));
-  auto energy = torch::empty({1}, torch::TensorOptions().dtype(torch_float_dtype).device(torch::kCUDA));
-  auto forces = torch::empty({n_nodes,3}, torch::TensorOptions().dtype(torch_float_dtype).device(torch::kCUDA));
-  auto ptr = torch::empty({2}, torch::TensorOptions().dtype(torch::kInt64).device(torch::kCUDA));
-  auto weight = torch::empty({1}, torch::TensorOptions().dtype(torch_float_dtype).device(torch::kCUDA));
+  auto batch = torch::zeros({n_nodes}, torch::TensorOptions().dtype(torch::kInt64).device(device));
+  auto energy = torch::empty({1}, torch::TensorOptions().dtype(torch_float_dtype).device(device));
+  auto forces = torch::empty({n_nodes,3}, torch::TensorOptions().dtype(torch_float_dtype).device(device));
+  auto ptr = torch::empty({2}, torch::TensorOptions().dtype(torch::kInt64).device(device));
+  auto weight = torch::empty({1}, torch::TensorOptions().dtype(torch_float_dtype).device(device));
   ptr[0] = 0;
   ptr[1] = n_nodes;
   weight[0] = 1.0;
@@ -464,15 +464,7 @@ std::cout << "node_energy: " << output.at("node_energy").toTensor().to("cpu") <<
 template<class DeviceType>
 void PairMACEKokkos<DeviceType>::settings(int narg, char **arg)
 {
-  if (narg == 1) {
-    if (strcmp(arg[0], "no_domain_decomposition") == 0) {
-      domain_decomposition = false;
-    } else {
-      error->all(FLERR, "Invalid option for pair_style mace.");
-    }
-  } else if (narg > 1) {
-    error->all(FLERR, "Too many pair_style arguments for pair_style mace.");
-  }
+  PairMACE::settings(narg, arg);
 }
 
 /* ---------------------------------------------------------------------- */
