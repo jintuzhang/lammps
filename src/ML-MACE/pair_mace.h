@@ -27,6 +27,7 @@ PairStyle(mace,PairMACE);
 
 #include "pair.h"
 
+#include <torch/torch.h>
 #include <torch/script.h>
 
 namespace LAMMPS_NS {
@@ -46,7 +47,9 @@ class PairMACE : public Pair {
 
  protected:
 
+  std::string device_type = "cpu";
   bool domain_decomposition = true;
+  torch::Device device = torch::kCPU;
   torch::jit::script::Module model;
   torch::ScalarType torch_float_dtype;
   double r_max;
