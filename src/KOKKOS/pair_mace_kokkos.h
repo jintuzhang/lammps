@@ -39,13 +39,12 @@ class PairMACEKokkos : public PairMACE {
 
  public:
 
-  enum {EnabledNeighFlags=FULL|HALFTHREAD|HALF};
+  //enum {EnabledNeighFlags=FULL};
   typedef DeviceType device_type;
   typedef ArrayTypes<DeviceType> AT;
   PairMACEKokkos(class LAMMPS *);
   ~PairMACEKokkos() override;
   void compute(int, int) override;
-  void settings(int, char **) override;
   void coeff(int, char **) override;
   void init_style() override;
   double init_one(int, int) override;

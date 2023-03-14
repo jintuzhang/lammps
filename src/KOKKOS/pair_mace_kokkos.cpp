@@ -96,9 +96,6 @@ void PairMACEKokkos<DeviceType>::compute(int eflag, int vflag)
   auto d_neighbors = k_list->d_neighbors;
   auto d_ilist = k_list->d_ilist;
 
-std::cout << "nlocal inum " << atom->nlocal << " " << list->inum << std::endl;
-std::cout << "ghost gnum " << atom->nghost << " " << list->gnum << std::endl;
-
   if (atom->nlocal != list->inum) error->all(FLERR, "ERROR: nlocal != inum.");
   if (domain_decomposition) {
     if (atom->nghost != list->gnum) error->all(FLERR, "ERROR: nghost != gnum.");
@@ -203,8 +200,7 @@ std::cout << "ghost gnum " << atom->nghost << " " << list->gnum << std::endl;
     const double xtmp = x(i,0);
     const double ytmp = x(i,1);
     const double ztmp = x(i,2);
-    const int jnum = d_numneigh(i);
-    for (int jj=0; jj<jnum; ++jj) {
+    for (int jj=0; jj<d_numneigh(i); ++jj) {
       int j = d_neighbors(i,jj);
       j &= NEIGHMASK;
       const double delx = xtmp - x(j,0);
@@ -216,8 +212,10 @@ std::cout << "ghost gnum " << atom->nghost << " " << list->gnum << std::endl;
       }
     }
   });
-  int n_edges = 0;
-  Kokkos::parallel_reduce(n_nodes, KOKKOS_LAMBDA(const int ii, int& n_edges) {
+  // WARNING: if n_edges remains 0 (e.g., because atoms too far apart)
+  // strange things happen on gpu
+  int64_t n_edges = 0;
+  Kokkos::parallel_reduce(n_nodes, KOKKOS_LAMBDA(const int ii, int64_t& n_edges) {
     n_edges += k_n_edges_vec(ii);
   }, n_edges);
   // make first_edge vector to help with parallelizing following loop
@@ -237,9 +235,8 @@ std::cout << "ghost gnum " << atom->nghost << " " << list->gnum << std::endl;
       const double xtmp = x(i,0);
       const double ytmp = x(i,1);
       const double ztmp = x(i,2);
-      const int jnum = d_numneigh(i);
       int k = k_first_edge(ii);
-      for (int jj=0; jj<jnum; ++jj) {
+      for (int jj=0; jj<d_numneigh(i); ++jj) {
         int j = d_neighbors(i,jj);
         j &= NEIGHMASK;
         const double delx = xtmp - x(j,0);
@@ -261,9 +258,8 @@ std::cout << "ghost gnum " << atom->nghost << " " << list->gnum << std::endl;
       const double xtmp = x(i,0);
       const double ytmp = x(i,1);
       const double ztmp = x(i,2);
-      const int jnum = d_numneigh(i);
       int k = k_first_edge(ii);
-      for (int jj=0; jj<jnum; ++jj) {
+      for (int jj=0; jj<d_numneigh(i); ++jj) {
         int j = d_neighbors(i,jj);
         j &= NEIGHMASK;
         const double delx = xtmp - x(j,0);
@@ -337,6 +333,7 @@ std::cout << "ghost gnum " << atom->nghost << " " << list->gnum << std::endl;
     n_nodes,
     torch::TensorOptions().dtype(torch::kBool).device(device));
 
+  // TODO: why is batch of size n_nodes?
   // TODO: add device?
   auto batch = torch::zeros({n_nodes}, torch::TensorOptions().dtype(torch::kInt64).device(device));
   auto energy = torch::empty({1}, torch::TensorOptions().dtype(torch_float_dtype).device(device));
@@ -362,10 +359,10 @@ std::cout << "ghost gnum " << atom->nghost << " " << list->gnum << std::endl;
   input.insert("weight", weight);
 std::cout << "batch" << batch.to("cpu") << std::endl;
 std::cout << "cell" << cell.to("cpu") << std::endl;
-std::cout << "edge_index" << edge_index.to("cpu") << std::endl;
+//std::cout << "edge_index" << edge_index.to("cpu") << std::endl;
 // energy
 // forces
-std::cout << "node_attrs" << node_attrs.to("cpu") << std::endl;
+//std::cout << "node_attrs" << node_attrs.to("cpu") << std::endl;
 std::cout << "positions" << positions.to("cpu") << std::endl;
 std::cout << "ptr" << ptr.to("cpu") << std::endl;
 std::cout << "shifts" << shifts.to("cpu") << std::endl;
@@ -374,12 +371,18 @@ std::cout << "weight" << weight.to("cpu") << std::endl;
 std::cout << "mask" << mask.to("cpu") << std::endl;
   auto output = model.forward({input, mask, true, true, false}).toGenericDict();
 
-//
+  //std::cout << "node energy: " << typeid(output.at("node_energy").toTensor()).name() << std::endl;
+  //std::cout << "node energy: " << typeid(output.at("node_energy").toTensor().data_ptr()).name() << std::endl;
+  //std::cout << "forces: " << typeid(output.at("forces").toTensor()).name() << std::endl;
+  //std::cout << "forces: " << typeid(output.at("forces").toTensor().data_ptr()).name() << std::endl;
+
+
   // mace energy
   //   -> sum of site energies of local atoms
   if (eflag_global) {
     auto node_energy = output.at("node_energy").toTensor();
-    auto k_node_energy = Kokkos::View<double*,DeviceType,Kokkos::MemoryTraits<Kokkos::Unmanaged>>(node_energy.data_ptr<double>(),n_nodes);
+    auto node_energy_ptr = static_cast<double*>(node_energy.data_ptr());
+    auto k_node_energy = Kokkos::View<double*,Kokkos::LayoutRight,DeviceType,Kokkos::MemoryTraits<Kokkos::Unmanaged>>(node_energy_ptr,n_nodes);
     eng_vdwl = 0.0;
     Kokkos::parallel_reduce(nlocal, KOKKOS_LAMBDA(const int ii, double &eng_vdwl) {
       const int i = d_ilist(ii);
@@ -390,7 +393,8 @@ std::cout << "mask" << mask.to("cpu") << std::endl;
   // mace forces
   //   -> derivatives of total mace energy
   forces = output.at("forces").toTensor();
-  auto k_forces = Kokkos::View<double*[3],Kokkos::LayoutRight,DeviceType,Kokkos::MemoryTraits<Kokkos::Unmanaged>>(forces.data_ptr<double>(),n_nodes);
+  auto forces_ptr = static_cast<double*>(forces.data_ptr());
+  auto k_forces = Kokkos::View<double*[3],Kokkos::LayoutRight,DeviceType,Kokkos::MemoryTraits<Kokkos::Unmanaged>>(forces_ptr,n_nodes);
   Kokkos::parallel_for(nlocal, KOKKOS_LAMBDA(const int ii) {
     const int i = d_ilist(ii);
     f(i,0) = k_forces(i,0);
@@ -462,14 +466,6 @@ std::cout << "node_energy: " << output.at("node_energy").toTensor().to("cpu") <<
 /* ---------------------------------------------------------------------- */
 
 template<class DeviceType>
-void PairMACEKokkos<DeviceType>::settings(int narg, char **arg)
-{
-  PairMACE::settings(narg, arg);
-}
-
-/* ---------------------------------------------------------------------- */
-
-template<class DeviceType>
 void PairMACEKokkos<DeviceType>::coeff(int narg, char **arg)
 {
 std::cout << "hello from kokkos coeff" << std::endl;
@@ -483,7 +479,7 @@ template<class DeviceType>
 void PairMACEKokkos<DeviceType>::init_style()
 {
 std::cout << "hello from kokkos init_style" << std::endl;
-  if (force->newton_pair == 0) error->all(FLERR, "ERROR: Pair style mace requires newton pair on.");
+//  if (force->newton_pair == 0) error->all(FLERR, "ERROR: Pair style mace requires newton pair on.");
 
 //  /*
 //    MACE requires the full neighbor list AND neighbors of ghost atoms
@@ -501,23 +497,23 @@ std::cout << "hello from kokkos init_style" << std::endl;
 //    neighbor->add_request(this, NeighConst::REQ_FULL);
 //  }
 
-  if (host_flag) {
-    PairMACE::init_style();
-    return;
-  }
-std::cout << "after mace init" << std::endl;
-
-  // neighbor list request for KOKKOS
-
-  neighflag = lmp->kokkos->neighflag;
-
-  auto request = neighbor->add_request(this, NeighConst::REQ_FULL);
-  //if (domain_decomposition) {
-    //auto request = neighbor->add_request(this, NeighConst::REQ_FULL | NeighConst::REQ_GHOST);
-    request->set_kokkos_host(std::is_same<DeviceType,LMPHostType>::value &&
-                             !std::is_same<DeviceType,LMPDeviceType>::value);
-    request->set_kokkos_device(std::is_same<DeviceType,LMPDeviceType>::value);
-    if (neighflag == FULL) request->enable_full();
+//  if (host_flag) {
+//    PairMACE::init_style();
+//    return;
+//  }
+//std::cout << "after mace init" << std::endl;
+//
+//  // neighbor list request for KOKKOS
+//
+//  neighflag = lmp->kokkos->neighflag;
+//
+//  auto request = neighbor->add_request(this, NeighConst::REQ_FULL);
+//  //if (domain_decomposition) {
+//    //auto request = neighbor->add_request(this, NeighConst::REQ_FULL | NeighConst::REQ_GHOST);
+//    request->set_kokkos_host(std::is_same<DeviceType,LMPHostType>::value &&
+//                             !std::is_same<DeviceType,LMPDeviceType>::value);
+//    request->set_kokkos_device(std::is_same<DeviceType,LMPDeviceType>::value);
+//    if (neighflag == FULL) request->enable_full();
   //} else {
   //  auto request = neighbor->add_request(this, NeighConst::REQ_FULL);
   //  request->set_kokkos_host(std::is_same<DeviceType,LMPHostType>::value &&
@@ -531,6 +527,11 @@ std::cout << "after mace init" << std::endl;
 
 
 
+  PairMACE::init_style();
+  auto request = neighbor->find_request(this);
+  request->set_kokkos_host(std::is_same<DeviceType,LMPHostType>::value &&
+                           !std::is_same<DeviceType,LMPDeviceType>::value);
+  request->set_kokkos_device(std::is_same<DeviceType,LMPDeviceType>::value);
 
 
 
