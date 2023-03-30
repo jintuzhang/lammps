@@ -18,7 +18,6 @@
 
 #include "pair_mace_kokkos.h"
 
-// TODO: do i need all these?
 #include "atom_kokkos.h"
 #include "atom_masks.h"
 #include "error.h"
@@ -42,17 +41,7 @@ using namespace LAMMPS_NS;
 template<class DeviceType>
 PairMACEKokkos<DeviceType>::PairMACEKokkos(LAMMPS *lmp) : PairMACE(lmp)
 {
-std::cout << "hello from kokkos mace constructor" << std::endl;
   no_virial_fdotr_compute = 1;
-
-  //kokkosable = 1;
-  //atomKK = (AtomKokkos *) atom;
-  //execution_space = ExecutionSpaceFromDevice<DeviceType>::space;
-  //datamask_read = X_MASK | F_MASK | TYPE_MASK | ENERGY_MASK | VIRIAL_MASK;
-  //datamask_modify = F_MASK | ENERGY_MASK | VIRIAL_MASK;
-  // pair_pace_kokkos has these instead
-  //datamask_read = EMPTY_MASK;
-  //datamask_modify = EMPTY_MASK;
 
   kokkosable = 1;
   atomKK = (AtomKokkos *) atom;
@@ -69,17 +58,6 @@ template<class DeviceType>
 PairMACEKokkos<DeviceType>::~PairMACEKokkos()
 {
   if (copymode) return;
-
-  // from lj_cut_kokkos
-  //if (allocated) {
-  //  memoryKK->destroy_kokkos(k_eatom,eatom);
-  //  memoryKK->destroy_kokkos(k_vatom,vatom);
-  //  memoryKK->destroy_kokkos(k_cutsq,cutsq);
-  //}
-
-  // from pair_pace_kokkos
-  //memoryKK->destroy_kokkos(k_eatom,eatom);
-  //memoryKK->destroy_kokkos(k_vatom,vatom);
 }
 
 /* ---------------------------------------------------------------------- */
@@ -105,17 +83,6 @@ void PairMACEKokkos<DeviceType>::compute(int eflag, int vflag)
     error->all(FLERR, "ERROR: kokkos eflag_atom not implemented.");
   }
 
-//  if (eflag_atom) {
-//    memoryKK->destroy_kokkos(k_eatom,eatom);
-//    memoryKK->create_kokkos(k_eatom,eatom,maxeatom,"pair:eatom");
-//    d_eatom = k_eatom.view<DeviceType>();
-//  }
-//  if (vflag_atom) {
-//    memoryKK->destroy_kokkos(k_vatom,vatom);
-//    memoryKK->create_kokkos(k_vatom,vatom,maxvatom,"pair:vatom");
-//    d_vatom = k_vatom.view<DeviceType>();
-//  }
-
   int nlocal = atom->nlocal;
   auto r_max_squared = this->r_max_squared;
   auto h0 = domain->h[0];
@@ -136,11 +103,13 @@ void PairMACEKokkos<DeviceType>::compute(int eflag, int vflag)
   for (int i=0; i<lammps_atomic_numbers.size(); ++i) {
     k_lammps_atomic_numbers_mirror(i) = lammps_atomic_numbers[i];
   }
+  Kokkos::deep_copy(k_lammps_atomic_numbers, k_lammps_atomic_numbers_mirror);
   auto k_mace_atomic_numbers = Kokkos::View<int64_t*,DeviceType>("k_mace_atomic_numbers",mace_atomic_numbers.size());
   auto k_mace_atomic_numbers_mirror = Kokkos::create_mirror_view(k_mace_atomic_numbers);
   for (int i=0; i<lammps_atomic_numbers.size(); ++i) {
     k_mace_atomic_numbers_mirror(i) = mace_atomic_numbers[i];
   }
+  Kokkos::deep_copy(k_mace_atomic_numbers, k_mace_atomic_numbers_mirror);
   auto mace_atomic_numbers_size = mace_atomic_numbers.size();
 
   // atom map
@@ -148,7 +117,6 @@ void PairMACEKokkos<DeviceType>::compute(int eflag, int vflag)
   auto k_map_array = atomKK->k_map_array;
   auto k_map_hash = atomKK->k_map_hash;
   k_map_array.template sync<DeviceType>();
-
 
   auto x = atomKK->k_x.view<DeviceType>();
 //  c_x = atomKK->k_x.view<DeviceType>();
@@ -220,10 +188,12 @@ void PairMACEKokkos<DeviceType>::compute(int eflag, int vflag)
   }, n_edges);
   // make first_edge vector to help with parallelizing following loop
   auto k_first_edge = Kokkos::View<int64_t*,DeviceType>("k_first_edge", n_nodes);  // initialized to zero
-  Kokkos::parallel_for(n_nodes-1, KOKKOS_LAMBDA(const int ii) {
-    k_first_edge(ii+1) = k_first_edge(ii) + k_n_edges_vec(ii);
+  // TODO: this is serial to avoid race ... is there something better?
+  Kokkos::parallel_for(1, KOKKOS_LAMBDA(const int i) {
+    for (int ii=0; ii<n_nodes-1; ++ii) {
+      k_first_edge(ii+1) = k_first_edge(ii) + k_n_edges_vec(ii);
+    }
   });
-  // fill edge_index and unit_shifts tensors
   auto k_edge_index = Kokkos::View<int64_t**,Kokkos::LayoutRight,DeviceType>("k_edge_index", 2, n_edges);
   auto k_unit_shifts = Kokkos::View<double*[3],Kokkos::LayoutRight,DeviceType>("k_unit_shifts", n_edges);
   auto k_shifts = Kokkos::View<double*[3],Kokkos::LayoutRight,DeviceType>("k_shifts", n_edges);
@@ -268,7 +238,6 @@ void PairMACEKokkos<DeviceType>::compute(int eflag, int vflag)
         const double rsq = delx*delx + dely*dely + delz*delz;
         if (rsq < r_max_squared) {
           k_edge_index(0,k) = i;
-          //int j_local = atom->map(tag(j));
           int j_local = AtomKokkos::map_kokkos<DeviceType>(tag(j),map_style,k_map_array,k_map_hash);
           k_edge_index(1,k) = j_local;
           double shiftx = x(j,0) - x(j_local,0);
@@ -314,7 +283,6 @@ void PairMACEKokkos<DeviceType>::compute(int eflag, int vflag)
         t = j+1;
       }
     }
-    //if (t==-1) error->all(FLERR, "ERROR: problem converting lammps_type to mace_type.");
     k_node_attrs(i,t-1) = 1.0;
   });
   auto node_attrs = torch::from_blob(
@@ -334,7 +302,6 @@ void PairMACEKokkos<DeviceType>::compute(int eflag, int vflag)
     torch::TensorOptions().dtype(torch::kBool).device(device));
 
   // TODO: why is batch of size n_nodes?
-  // TODO: add device?
   auto batch = torch::zeros({n_nodes}, torch::TensorOptions().dtype(torch::kInt64).device(device));
   auto energy = torch::empty({1}, torch::TensorOptions().dtype(torch_float_dtype).device(device));
   auto forces = torch::empty({n_nodes,3}, torch::TensorOptions().dtype(torch_float_dtype).device(device));
@@ -357,25 +324,22 @@ void PairMACEKokkos<DeviceType>::compute(int eflag, int vflag)
   input.insert("shifts", shifts);
   input.insert("unit_shifts", unit_shifts);
   input.insert("weight", weight);
-std::cout << "batch" << batch.to("cpu") << std::endl;
-std::cout << "cell" << cell.to("cpu") << std::endl;
+
+//std::cout << "batch" << batch.to("cpu") << std::endl;
+//std::cout << "cell" << cell.to("cpu") << std::endl;
 //std::cout << "edge_index" << edge_index.to("cpu") << std::endl;
-// energy
-// forces
 //std::cout << "node_attrs" << node_attrs.to("cpu") << std::endl;
-std::cout << "positions" << positions.to("cpu") << std::endl;
-std::cout << "ptr" << ptr.to("cpu") << std::endl;
-std::cout << "shifts" << shifts.to("cpu") << std::endl;
-std::cout << "unit_shifts" << unit_shifts.to("cpu") << std::endl;
-std::cout << "weight" << weight.to("cpu") << std::endl;
-std::cout << "mask" << mask.to("cpu") << std::endl;
+//std::cout << "positions" << positions.to("cpu") << std::endl;
+//std::cout << "ptr" << ptr.to("cpu") << std::endl;
+//std::cout << "shifts" << shifts.to("cpu") << std::endl;
+//std::cout << "unit_shifts" << unit_shifts.to("cpu") << std::endl;
+//std::cout << "weight" << weight.to("cpu") << std::endl;
+//std::cout << "mask" << mask.to("cpu") << std::endl;
+
   auto output = model.forward({input, mask, true, true, false}).toGenericDict();
 
-  //std::cout << "node energy: " << typeid(output.at("node_energy").toTensor()).name() << std::endl;
-  //std::cout << "node energy: " << typeid(output.at("node_energy").toTensor().data_ptr()).name() << std::endl;
-  //std::cout << "forces: " << typeid(output.at("forces").toTensor()).name() << std::endl;
-  //std::cout << "forces: " << typeid(output.at("forces").toTensor().data_ptr()).name() << std::endl;
-
+//std::cout << "energy: " << output.at("energy").toTensor().to("cpu") << std::endl;
+//std::cout << "node_energy: " << output.at("node_energy").toTensor().to("cpu") << std::endl;
 
   // mace energy
   //   -> sum of site energies of local atoms
@@ -401,66 +365,18 @@ std::cout << "mask" << mask.to("cpu") << std::endl;
     f(i,1) = k_forces(i,1);
     f(i,2) = k_forces(i,2);
   });
-//
-////  // mace site energies
-////  //   -> local atoms only
-////  if (eflag_atom) {
-////    auto node_energy = output.at("node_energy").toTensor();
-////    #pragma omp parallel for
-////    for (int ii=0; ii<list->inum; ++ii) {
-////      int i = list->ilist[ii];
-////      eatom[i] = node_energy[i].item<double>();
-////    }
-////  }
-////
-//  // mace virials (local atoms only)
-//  //   -> derivatives of sum of site energies of local atoms
-//  if (vflag_global) {
-//    auto vir = output.at("virials").toTensor();
-//    virial[0] = vir[0][0][0].item<double>();
-//    virial[1] = vir[0][1][1].item<double>();
-//    virial[2] = vir[0][2][2].item<double>();
-//    virial[3] = 0.5*(vir[0][2][1].item<double>() + vir[0][1][2].item<double>());
-//    virial[4] = 0.5*(vir[0][2][0].item<double>() + vir[0][0][2].item<double>());
-//    virial[5] = 0.5*(vir[0][1][0].item<double>() + vir[0][0][1].item<double>());
-//  }
-////
-////  // mace site virials
-////  //   -> not available
-////  if (vflag_atom) {
-////    error->all(FLERR, "ERROR: pair_mace does not support vflag_atom.");
-////  }
-//
-//
-//  //copymode = 1;
-//
-//  //EV_FLOAT ev = pair_compute<PairLJCutKokkos<DeviceType>,void >(this,(NeighListKokkos<DeviceType>*)list);
-//
-//  //if (eflag_global) eng_vdwl += ev.evdwl;
-//  //if (vflag_global) {
-//  //  virial[0] += ev.v[0];
-//  //  virial[1] += ev.v[1];
-//  //  virial[2] += ev.v[2];
-//  //  virial[3] += ev.v[3];
-//  //  virial[4] += ev.v[4];
-//  //  virial[5] += ev.v[5];
-//  //}
-//
-//  //if (eflag_atom) {
-//  //  k_eatom.template modify<DeviceType>();
-//  //  k_eatom.template sync<LMPHostType>();
-//  //}
-//
-//  //if (vflag_atom) {
-//  //  k_vatom.template modify<DeviceType>();
-//  //  k_vatom.template sync<LMPHostType>();
-//  //}
-//
-//  copymode = 0;
 
-std::cout << "energy: " << output.at("energy").toTensor().to("cpu") << std::endl;
-std::cout << "node_energy: " << output.at("node_energy").toTensor().to("cpu") << std::endl;
-
+  // mace virials (local atoms only)
+  //   -> derivatives of sum of site energies of local atoms
+  if (vflag_global) {
+    auto vir = output.at("virials").toTensor().to("cpu");
+    virial[0] = vir[0][0][0].item<double>();
+    virial[1] = vir[0][1][1].item<double>();
+    virial[2] = vir[0][2][2].item<double>();
+    virial[3] = 0.5*(vir[0][2][1].item<double>() + vir[0][1][2].item<double>());
+    virial[4] = 0.5*(vir[0][2][0].item<double>() + vir[0][0][2].item<double>());
+    virial[5] = 0.5*(vir[0][1][0].item<double>() + vir[0][0][1].item<double>());
+  }
 }
 
 /* ---------------------------------------------------------------------- */
@@ -468,160 +384,36 @@ std::cout << "node_energy: " << output.at("node_energy").toTensor().to("cpu") <<
 template<class DeviceType>
 void PairMACEKokkos<DeviceType>::coeff(int narg, char **arg)
 {
-std::cout << "hello from kokkos coeff" << std::endl;
   if (!allocated) allocate();
-std::cout << "allocated: " << allocated << std::endl;
   PairMACE::coeff(narg,arg);
-std::cout << "allocated: " << allocated << std::endl;
 }
 
 template<class DeviceType>
 void PairMACEKokkos<DeviceType>::init_style()
 {
-std::cout << "hello from kokkos init_style" << std::endl;
-//  if (force->newton_pair == 0) error->all(FLERR, "ERROR: Pair style mace requires newton pair on.");
-
-//  /*
-//    MACE requires the full neighbor list AND neighbors of ghost atoms
-//    it appears that:
-//      * without REQ_GHOST
-//           list->gnum == 0
-//           list->ilist does not include ghost atoms, but the jlists do
-//      * with REQ_GHOST
-//           list->gnum == atom->nghost
-//           list->ilist includes ghost atoms
-//  */
-//  if (domain_decomposition) {
-//    neighbor->add_request(this, NeighConst::REQ_FULL | NeighConst::REQ_GHOST);
-//  } else {
-//    neighbor->add_request(this, NeighConst::REQ_FULL);
-//  }
-
-//  if (host_flag) {
-//    PairMACE::init_style();
-//    return;
-//  }
-//std::cout << "after mace init" << std::endl;
-//
-//  // neighbor list request for KOKKOS
-//
-//  neighflag = lmp->kokkos->neighflag;
-//
-//  auto request = neighbor->add_request(this, NeighConst::REQ_FULL);
-//  //if (domain_decomposition) {
-//    //auto request = neighbor->add_request(this, NeighConst::REQ_FULL | NeighConst::REQ_GHOST);
-//    request->set_kokkos_host(std::is_same<DeviceType,LMPHostType>::value &&
-//                             !std::is_same<DeviceType,LMPDeviceType>::value);
-//    request->set_kokkos_device(std::is_same<DeviceType,LMPDeviceType>::value);
-//    if (neighflag == FULL) request->enable_full();
-  //} else {
-  //  auto request = neighbor->add_request(this, NeighConst::REQ_FULL);
-  //  request->set_kokkos_host(std::is_same<DeviceType,LMPHostType>::value &&
-  //                           !std::is_same<DeviceType,LMPDeviceType>::value);
-  //  request->set_kokkos_device(std::is_same<DeviceType,LMPDeviceType>::value);
-  //}
-//  if (neighflag == FULL)
-//    error->all(FLERR,"Must use half neighbor list style with pair pace/kk");
-
-
-
-
-
   PairMACE::init_style();
   auto request = neighbor->find_request(this);
   request->set_kokkos_host(std::is_same<DeviceType,LMPHostType>::value &&
                            !std::is_same<DeviceType,LMPDeviceType>::value);
   request->set_kokkos_device(std::is_same<DeviceType,LMPDeviceType>::value);
-
-
-
-
-
-
-//  // TODO: from lj_cut, possibly delete
-//  // adjust neighbor list request for KOKKOS
-//  auto request = neighbor->add_request(this, NeighConst::REQ_FULL);
-//  request->set_kokkos_host(std::is_same<DeviceType,LMPHostType>::value &&
-//                           !std::is_same<DeviceType,LMPDeviceType>::value);
-//  request->set_kokkos_device(std::is_same<DeviceType,LMPDeviceType>::value);
-//
-//  neighflag = lmp->kokkos->neighflag;
-//  auto request = neighbor->find_request(this);
-//std::cout << "before request" << std::endl;
-//  request->set_kokkos_host(std::is_same<DeviceType,LMPHostType>::value &&
-//                           !std::is_same<DeviceType,LMPDeviceType>::value);
-//std::cout << "before request" << std::endl;
-//  request->set_kokkos_device(std::is_same<DeviceType,LMPDeviceType>::value);
-//std::cout << "after request" << std::endl;
-//  if (neighflag == FULL)
-//    std::cout << "REQUESTING FULL LIST." << std::endl;
-//  if (neighflag == FULL) request->enable_full();
-
-  //auto request = neighbor->add_request(this, NeighConst::REQ_FULL);
-  //request->set_kokkos_host(std::is_same<DeviceType,LMPHostType>::value &&
-  //                         !std::is_same<DeviceType,LMPDeviceType>::value);
-  //request->set_kokkos_device(std::is_same<DeviceType,LMPDeviceType>::value);
-  //if (neighflag == FULL)
-  //  error->all(FLERR,"Must use half neighbor list style with pair pace/kk");
-
-std::cout << "goodbye from init_style" << std::endl;
 }
 
 template<class DeviceType>
 double PairMACEKokkos<DeviceType>::init_one(int i, int j)
 {
-std::cout << "hello from kokkos init_one" << std::endl;
   double cutone = PairMACE::init_one(i,j);
-
-  //k_scale.h_view(i,j) = k_scale.h_view(j,i) = scale[i][j];
-  //k_scale.template modify<LMPHostType>();
-
   k_cutsq.h_view(i,j) = k_cutsq.h_view(j,i) = cutone*cutone;
   k_cutsq.template modify<LMPHostType>();
-
   return cutone;
-
-  //// to account for message passing, require cutoff of n_layers * r_max
-  //return num_interactions*model.attr("r_max").toTensor().item<double>();
-
-//  k_params.h_view(i,j).lj1 = lj1[i][j];
-//  k_params.h_view(i,j).lj2 = lj2[i][j];
-//  k_params.h_view(i,j).lj3 = lj3[i][j];
-//  k_params.h_view(i,j).lj4 = lj4[i][j];
-//  k_params.h_view(i,j).offset = offset[i][j];
-//  k_params.h_view(i,j).cutsq = cutone*cutone;
-//  k_params.h_view(j,i) = k_params.h_view(i,j);
-//  if (i<MAX_TYPES_STACKPARAMS+1 && j<MAX_TYPES_STACKPARAMS+1) {
-//    m_params[i][j] = m_params[j][i] = k_params.h_view(i,j);
-//    m_cutsq[j][i] = m_cutsq[i][j] = cutone*cutone;
-//  }
-//
-//  k_cutsq.h_view(i,j) = k_cutsq.h_view(j,i) = cutone*cutone;
-//  k_cutsq.template modify<LMPHostType>();
-//  k_params.template modify<LMPHostType>();
-
-//  return cutone;
 }
 
 template<class DeviceType>
 void PairMACEKokkos<DeviceType>::allocate()
 {
-std::cout << "hello from kokkos allocate" << std::endl;
   PairMACE::allocate();
-
   int n = atom->ntypes + 1;
-  //MemKK::realloc_kokkos(d_map, "pace:map", n);
-
   MemKK::realloc_kokkos(k_cutsq, "mace:cutsq", n, n);
   d_cutsq = k_cutsq.template view<DeviceType>();
-
-  // TODO: from lj_cut, possibly delete
-  //int n = atom->ntypes;
-  //memory->destroy(cutsq);
-  //memoryKK->create_kokkos(k_cutsq,cutsq,n+1,n+1,"pair:cutsq");
-  //d_cutsq = k_cutsq.template view<DeviceType>();
-  //k_params = Kokkos::DualView<params_lj**,Kokkos::LayoutRight,DeviceType>("PairLJCut::params",n+1,n+1);
-  //params = k_params.template view<DeviceType>();
 }
 
 namespace LAMMPS_NS {

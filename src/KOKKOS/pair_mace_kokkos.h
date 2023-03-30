@@ -39,7 +39,6 @@ class PairMACEKokkos : public PairMACE {
 
  public:
 
-  //enum {EnabledNeighFlags=FULL};
   typedef DeviceType device_type;
   typedef ArrayTypes<DeviceType> AT;
   PairMACEKokkos(class LAMMPS *);
@@ -52,17 +51,7 @@ class PairMACEKokkos : public PairMACE {
 
  protected:
 
-  // kokkos stuff
   int host_flag;
-  int neighflag;
-  //typename AT::t_x_array_randomread x;
-  //typename AT::t_x_array c_x;
-  //typename AT::t_f_array f;
-  //typename AT::t_int_1d_randomread type;
-
-  
-  //Kokkos::View<double*[3], DeviceType> k_positions;
-
   typedef Kokkos::DualView<F_FLOAT**, DeviceType> tdual_fparams;
   tdual_fparams k_cutsq;
   typedef Kokkos::View<F_FLOAT**, DeviceType> t_fparams;
