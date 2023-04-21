@@ -57,6 +57,11 @@ class PairMACEKokkos : public PairMACE {
   typedef Kokkos::View<F_FLOAT**, DeviceType> t_fparams;
   t_fparams d_cutsq;
 
+  // new
+  Kokkos::View<int64_t*,DeviceType> k_lammps_atomic_numbers;
+  Kokkos::View<int64_t*,DeviceType> k_mace_atomic_numbers;
+  int mace_atomic_numbers_size;
+
 };
 }    // namespace LAMMPS_NS
 

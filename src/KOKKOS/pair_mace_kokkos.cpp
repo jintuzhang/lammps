@@ -98,19 +98,9 @@ void PairMACEKokkos<DeviceType>::compute(int eflag, int vflag)
   auto hinv4 = domain->h_inv[4];
   auto hinv5 = domain->h_inv[5];
 
-  auto k_lammps_atomic_numbers = Kokkos::View<int64_t*,DeviceType>("k_lammps_atomic_numbers",lammps_atomic_numbers.size());
-  auto k_lammps_atomic_numbers_mirror = Kokkos::create_mirror_view(k_lammps_atomic_numbers);
-  for (int i=0; i<lammps_atomic_numbers.size(); ++i) {
-    k_lammps_atomic_numbers_mirror(i) = lammps_atomic_numbers[i];
-  }
-  Kokkos::deep_copy(k_lammps_atomic_numbers, k_lammps_atomic_numbers_mirror);
-  auto k_mace_atomic_numbers = Kokkos::View<int64_t*,DeviceType>("k_mace_atomic_numbers",mace_atomic_numbers.size());
-  auto k_mace_atomic_numbers_mirror = Kokkos::create_mirror_view(k_mace_atomic_numbers);
-  for (int i=0; i<lammps_atomic_numbers.size(); ++i) {
-    k_mace_atomic_numbers_mirror(i) = mace_atomic_numbers[i];
-  }
-  Kokkos::deep_copy(k_mace_atomic_numbers, k_mace_atomic_numbers_mirror);
-  auto mace_atomic_numbers_size = mace_atomic_numbers.size();
+  auto _k_lammps_atomic_numbers = k_lammps_atomic_numbers;
+  auto _k_mace_atomic_numbers = k_mace_atomic_numbers;
+  auto _mace_atomic_numbers_size = mace_atomic_numbers_size;
 
   // atom map
   auto map_style = atom->map_style;
@@ -272,14 +262,14 @@ void PairMACEKokkos<DeviceType>::compute(int eflag, int vflag)
 
   // ----- node_attrs -----
   // node_attrs is one-hot encoding for atomic numbers
-  int n_node_feats = mace_atomic_numbers_size;
+  int n_node_feats = _mace_atomic_numbers_size;
   auto k_node_attrs = Kokkos::View<double**,Kokkos::LayoutRight,DeviceType>("k_node_attrs", n_nodes, n_node_feats);
   Kokkos::parallel_for(n_nodes, KOKKOS_LAMBDA(const int ii) {
     const int i = d_ilist(ii);
     const int lammps_type = type(i);
     int t = -1;
-    for (int j=0; j<mace_atomic_numbers_size; ++j) {
-      if (k_mace_atomic_numbers(j)==k_lammps_atomic_numbers(lammps_type-1)) {
+    for (int j=0; j<_mace_atomic_numbers_size; ++j) {
+      if (_k_mace_atomic_numbers(j)==_k_lammps_atomic_numbers(lammps_type-1)) {
         t = j+1;
       }
     }
@@ -386,6 +376,21 @@ void PairMACEKokkos<DeviceType>::coeff(int narg, char **arg)
 {
   if (!allocated) allocate();
   PairMACE::coeff(narg,arg);
+
+  // new
+  k_lammps_atomic_numbers = Kokkos::View<int64_t*,DeviceType>("k_lammps_atomic_numbers",lammps_atomic_numbers.size());
+  auto k_lammps_atomic_numbers_mirror = Kokkos::create_mirror_view(k_lammps_atomic_numbers);
+  for (int i=0; i<lammps_atomic_numbers.size(); ++i) {
+    k_lammps_atomic_numbers_mirror(i) = lammps_atomic_numbers[i];
+  }
+  Kokkos::deep_copy(k_lammps_atomic_numbers, k_lammps_atomic_numbers_mirror);
+  k_mace_atomic_numbers = Kokkos::View<int64_t*,DeviceType>("k_mace_atomic_numbers",mace_atomic_numbers.size());
+  auto k_mace_atomic_numbers_mirror = Kokkos::create_mirror_view(k_mace_atomic_numbers);
+  for (int i=0; i<lammps_atomic_numbers.size(); ++i) {
+    k_mace_atomic_numbers_mirror(i) = mace_atomic_numbers[i];
+  }
+  Kokkos::deep_copy(k_mace_atomic_numbers, k_mace_atomic_numbers_mirror);
+  mace_atomic_numbers_size = mace_atomic_numbers.size();
 }
 
 template<class DeviceType>
