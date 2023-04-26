@@ -127,7 +127,7 @@ void PairMACEKokkos<DeviceType>::compute(int eflag, int vflag)
     n_nodes = atom->nlocal;
   }
   auto k_positions = Kokkos::View<double*[3],Kokkos::LayoutRight,DeviceType>("k_positions", n_nodes);
-  Kokkos::parallel_for(n_nodes, KOKKOS_LAMBDA (const int i) {
+  Kokkos::parallel_for("PairMACEKokkos: Fill k_positions.", n_nodes, KOKKOS_LAMBDA (const int i) {
     k_positions(i,0) = x(i,0);
     k_positions(i,1) = x(i,1);
     k_positions(i,2) = x(i,2);
@@ -153,7 +153,7 @@ void PairMACEKokkos<DeviceType>::compute(int eflag, int vflag)
   // ----- edge_index and unit_shifts -----
   // count total number of edges
   auto k_n_edges_vec = Kokkos::View<int64_t*,DeviceType>("k_n_edges_vec", n_nodes);
-  Kokkos::parallel_for(n_nodes, KOKKOS_LAMBDA (const int ii) {
+  Kokkos::parallel_for("PairMACEKokkos: Fill k_n_edges_vec.", n_nodes, KOKKOS_LAMBDA (const int ii) {
     const int i = d_ilist(ii);
     const double xtmp = x(i,0);
     const double ytmp = x(i,1);
@@ -173,13 +173,13 @@ void PairMACEKokkos<DeviceType>::compute(int eflag, int vflag)
   // WARNING: if n_edges remains 0 (e.g., because atoms too far apart)
   // strange things happen on gpu
   int64_t n_edges = 0;
-  Kokkos::parallel_reduce(n_nodes, KOKKOS_LAMBDA(const int ii, int64_t& n_edges) {
+  Kokkos::parallel_reduce("PairMACEKokkos: Determine n_edges.", n_nodes, KOKKOS_LAMBDA(const int ii, int64_t& n_edges) {
     n_edges += k_n_edges_vec(ii);
   }, n_edges);
   // make first_edge vector to help with parallelizing following loop
   auto k_first_edge = Kokkos::View<int64_t*,DeviceType>("k_first_edge", n_nodes);  // initialized to zero
   // TODO: this is serial to avoid race ... is there something better?
-  Kokkos::parallel_for(1, KOKKOS_LAMBDA(const int i) {
+  Kokkos::parallel_for("PairMACEKokkos: Fill k_first_edge.", 1, KOKKOS_LAMBDA(const int i) {
     for (int ii=0; ii<n_nodes-1; ++ii) {
       k_first_edge(ii+1) = k_first_edge(ii) + k_n_edges_vec(ii);
     }
@@ -190,7 +190,7 @@ void PairMACEKokkos<DeviceType>::compute(int eflag, int vflag)
 
   if (domain_decomposition) {
 
-    Kokkos::parallel_for(n_nodes, KOKKOS_LAMBDA(const int ii) {
+    Kokkos::parallel_for("PairMACEKokkos: Fill edge_index (using domain decomposition).", n_nodes, KOKKOS_LAMBDA(const int ii) {
       const int i = d_ilist(ii);
       const double xtmp = x(i,0);
       const double ytmp = x(i,1);
@@ -213,7 +213,7 @@ void PairMACEKokkos<DeviceType>::compute(int eflag, int vflag)
 
   } else {
 
-    Kokkos::parallel_for(n_nodes, KOKKOS_LAMBDA(const int ii) {
+    Kokkos::parallel_for("PairMACEKokkos: Fill edge_index (no domain decomposition).", n_nodes, KOKKOS_LAMBDA(const int ii) {
       const int i = d_ilist(ii);
       const double xtmp = x(i,0);
       const double ytmp = x(i,1);
@@ -264,7 +264,7 @@ void PairMACEKokkos<DeviceType>::compute(int eflag, int vflag)
   // node_attrs is one-hot encoding for atomic numbers
   int n_node_feats = _mace_atomic_numbers_size;
   auto k_node_attrs = Kokkos::View<double**,Kokkos::LayoutRight,DeviceType>("k_node_attrs", n_nodes, n_node_feats);
-  Kokkos::parallel_for(n_nodes, KOKKOS_LAMBDA(const int ii) {
+  Kokkos::parallel_for("PairMACEKokkos: Fill k_node_attrs.", n_nodes, KOKKOS_LAMBDA(const int ii) {
     const int i = d_ilist(ii);
     const int lammps_type = type(i);
     int t = -1;
@@ -282,7 +282,7 @@ void PairMACEKokkos<DeviceType>::compute(int eflag, int vflag)
 
   // ----- mask for ghost -----
   Kokkos::View<bool*,DeviceType> k_mask("k_mask", n_nodes);
-  Kokkos::parallel_for(nlocal, KOKKOS_LAMBDA(const int ii) {
+  Kokkos::parallel_for("PairMACEKokkos: Fill k_mask.", nlocal, KOKKOS_LAMBDA(const int ii) {
     const int i = d_ilist(ii);
     k_mask(i) = true;
   });
@@ -338,7 +338,7 @@ void PairMACEKokkos<DeviceType>::compute(int eflag, int vflag)
     auto node_energy_ptr = static_cast<double*>(node_energy.data_ptr());
     auto k_node_energy = Kokkos::View<double*,Kokkos::LayoutRight,DeviceType,Kokkos::MemoryTraits<Kokkos::Unmanaged>>(node_energy_ptr,n_nodes);
     eng_vdwl = 0.0;
-    Kokkos::parallel_reduce(nlocal, KOKKOS_LAMBDA(const int ii, double &eng_vdwl) {
+    Kokkos::parallel_reduce("PairMACEKokkos: Accumulate site energies.", nlocal, KOKKOS_LAMBDA(const int ii, double &eng_vdwl) {
       const int i = d_ilist(ii);
       eng_vdwl += k_node_energy(i);
     }, eng_vdwl);
@@ -349,7 +349,7 @@ void PairMACEKokkos<DeviceType>::compute(int eflag, int vflag)
   forces = output.at("forces").toTensor();
   auto forces_ptr = static_cast<double*>(forces.data_ptr());
   auto k_forces = Kokkos::View<double*[3],Kokkos::LayoutRight,DeviceType,Kokkos::MemoryTraits<Kokkos::Unmanaged>>(forces_ptr,n_nodes);
-  Kokkos::parallel_for(nlocal, KOKKOS_LAMBDA(const int ii) {
+  Kokkos::parallel_for("PairMACEKokkos: Extract k_forces.", nlocal, KOKKOS_LAMBDA(const int ii) {
     const int i = d_ilist(ii);
     f(i,0) = k_forces(i,0);
     f(i,1) = k_forces(i,1);
