@@ -54,7 +54,7 @@ per atom, e.g. a list of bond distances.  Per-grid quantities are
 calculated on a regular 2d or 3d grid which overlays a 2d or 3d
 simulation domain.  The grid points and the data they store are
 distributed across processors; each processor owns the grid points
-which fall within its sub-domain.
+which fall within its subdomain.
 
 Computes that produce per-atom quantities have the word "atom" at the
 end of their style, e.g. *ke/atom*\ .  Computes that produce local
@@ -200,12 +200,15 @@ The individual style names on the :doc:`Commands compute <Commands_compute>` pag
 * :doc:`com/chunk <compute_com_chunk>` - center of mass for each chunk
 * :doc:`contact/atom <compute_contact_atom>` - contact count for each spherical particle
 * :doc:`coord/atom <compute_coord_atom>` - coordination number for each atom
+* :doc:`count/type <compute_count_type>` - count of atoms or bonds by type
 * :doc:`damage/atom <compute_damage_atom>` - Peridynamic damage for each atom
 * :doc:`dihedral <compute_dihedral>` - energy of each dihedral sub-style
 * :doc:`dihedral/local <compute_dihedral_local>` - angle of each dihedral
 * :doc:`dilatation/atom <compute_dilatation_atom>` - Peridynamic dilatation for each atom
 * :doc:`dipole <compute_dipole>` - dipole vector and total dipole
 * :doc:`dipole/chunk <compute_dipole_chunk>` - dipole vector and total dipole for each chunk
+* :doc:`dipole/tip4p <compute_dipole>` - dipole vector and total dipole with TIP4P pair style
+* :doc:`dipole/tip4p/chunk <compute_dipole_chunk>` - dipole vector and total dipole for each chunk with TIP4P pair style
 * :doc:`displace/atom <compute_displace_atom>` - displacement of each atom
 * :doc:`dpd <compute_dpd>` - total values of internal conductive energy, internal mechanical energy, chemical energy, and harmonic average of internal temperature
 * :doc:`dpd/atom <compute_dpd_atom>` - per-particle values of internal conductive energy, internal mechanical energy, chemical energy, and internal temperature
@@ -254,11 +257,11 @@ The individual style names on the :doc:`Commands compute <Commands_compute>` pag
 * :doc:`pair/local <compute_pair_local>` - distance/energy/force of each pairwise interaction
 * :doc:`pe <compute_pe>` - potential energy
 * :doc:`pe/atom <compute_pe_atom>` - potential energy for each atom
-* :doc:`mesont <compute_mesont>` - Nanotube bending,stretching, and intertube energies
 * :doc:`pe/mol/tally <compute_tally>` - potential energy between two groups of atoms separated into intermolecular and intramolecular components via the tally callback mechanism
 * :doc:`pe/tally <compute_tally>` - potential energy between two groups of atoms via the tally callback mechanism
 * :doc:`plasticity/atom <compute_plasticity_atom>` - Peridynamic plasticity for each atom
 * :doc:`pressure <compute_pressure>` - total pressure and pressure tensor
+* :doc:`pressure/alchemy <compute_pressure_alchemy>` - mixed system total pressure and pressure tensor for :doc:`fix alchemy <fix_alchemy>` runs
 * :doc:`pressure/uef <compute_pressure_uef>` - pressure tensor in the reference frame of an applied flow field
 * :doc:`property/atom <compute_property_atom>` - convert atom attributes to per-atom vectors/arrays
 * :doc:`property/chunk <compute_property_chunk>` - extract various per-chunk attributes

@@ -8,7 +8,7 @@ Packages are supported by either the LAMMPS developers or the
 contributing authors and written in a syntax and style consistent with
 the rest of LAMMPS.
 
-The "Examples" column is a sub-directory in the examples directory of the
+The "Examples" column is a subdirectory in the examples directory of the
 distribution which has one or more input scripts that use the package.
 E.g. "peptide" refers to the examples/peptide directory; PACKAGES/atc refers
 to the examples/PACKAGES/atc directory.  The "Lib" column indicates
@@ -233,11 +233,6 @@ whether an extra library is needed to build and use the package:
      - :doc:`fix lb/fluid <fix_lb_fluid>`
      - PACKAGES/latboltz
      - no
-   * - :ref:`LATTE <PKG-LATTE>`
-     - quantum DFTB forces via LATTE
-     - :doc:`fix latte <fix_latte>`
-     - latte
-     - ext
    * - :ref:`LEPTON <PKG-LEPTON>`
      - evaluate strings as potential function
      - :doc:`pair_style lepton <pair_lepton>`
@@ -275,9 +270,9 @@ whether an extra library is needed to build and use the package:
      - no
    * - :ref:`MESONT <PKG-MESONT>`
      - mesoscopic tubular potential model
-     - pair styles :doc:`mesont/tpm <pair_mesont_tpm>`, :doc:`mesocnt <pair_mesocnt>`
+     - pair styles :doc:`mesocnt <pair_mesocnt>`
      - PACKAGES/mesont
-     - int
+     - no
    * - :ref:`MGPT <PKG-MGPT>`
      - fast MGPT multi-ion potentials
      - :doc:`pair_style mgpt <pair_mgpt>`

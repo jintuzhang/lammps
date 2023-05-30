@@ -111,6 +111,7 @@ Syntax
                                q, mux, muy, muz, mu,
                                radius, diameter, omegax, omegay, omegaz,
                                angmomx, angmomy, angmomz, tqx, tqy, tqz,
+                               heatflow, temperature,
                                c_ID, c_ID[I], f_ID, f_ID[I], v_name,
                                i_name, d_name, i2_name[I], d2_name[I]
 
@@ -133,10 +134,12 @@ Syntax
            q = atom charge
            mux,muy,muz = orientation of dipole moment of atom
            mu = magnitude of dipole moment of atom
-           radius,diameter = radius,diameter of spherical particle
+           radius,diameter = radius, diameter of spherical particle
            omegax,omegay,omegaz = angular velocity of spherical particle
            angmomx,angmomy,angmomz = angular momentum of aspherical particle
            tqx,tqy,tqz = torque on finite-size particles
+           heatflow = rate of heat flow into particle
+           temperature = temperature of particle
            c_ID = per-atom vector calculated by a compute with ID
            c_ID[I] = Ith column of per-atom array calculated by a compute with ID, I can include wildcard (see below)
            f_ID = per-atom vector calculated by a fix with ID
@@ -375,7 +378,7 @@ output with each snapshot:
    nx ny nz
 
 The value dim will be 2 or 3 for 2d or 3d simulations.  It is included
-so that post-processing tools like `OVITO <https://www.ovito.org>`,
+so that post-processing tools like `OVITO <https://www.ovito.org>`_,
 which can visualize grid-based quantities know how to draw each grid
 cell.  The grid size will match the input script parameters for
 grid(s) created by the computes or fixes which are referenced by the
@@ -596,7 +599,7 @@ then one file per snapshot is written and the "\*" character is
 replaced with the timestep value.  For example, tmp.dump.\* becomes
 tmp.dump.0, tmp.dump.10000, tmp.dump.20000, etc.  This option is not
 available for the *dcd* and *xtc* styles.  Note that the
-:doc:`dump_modify pad <dump_modify>` command can be used to insure all
+:doc:`dump_modify pad <dump_modify>` command can be used to ensure all
 timestep numbers are the same length (e.g., 00010), which can make it
 easier to read a series of dump files in order with some
 post-processing tools.

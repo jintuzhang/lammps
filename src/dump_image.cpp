@@ -655,7 +655,7 @@ void DumpImage::write()
       ngrid = (nxhi_in-nxlo_in+1) * (nyhi_in-nylo_in+1) * (nzhi_in-nzlo_in+1);
     }
 
-    // insure gbuf is large enough
+    // ensure gbuf is large enough
 
     if (ngrid > maxgrid) {
       memory->destroy(gbuf);
@@ -664,20 +664,14 @@ void DumpImage::write()
     }
 
     // invoke Compute for per-grid quantities
-    // only if within a run or minimize
-    // else require the compute is current
-    // this prevents the compute from being invoked by the WriteDump class
+    // cannot invoke before first run, otherwise invoke if necessary
 
     if (grid_compute) {
-      if (update->whichflag == 0) {
-        if (grid_compute->invoked_pergrid != update->ntimestep)
-          error->all(FLERR,"Grid compute {} used in dump image between runs is not current",
-                     grid_compute->id);
-      } else {
-        if (!(grid_compute->invoked_flag & Compute::INVOKED_PERGRID)) {
-          grid_compute->compute_pergrid();
-          grid_compute->invoked_flag |= Compute::INVOKED_PERGRID;
-        }
+      if (update->first_update == 0)
+        error->all(FLERR,"Grid compute used in dump image cannot be invoked before first run");
+      if (!(grid_compute->invoked_flag & Compute::INVOKED_PERGRID)) {
+        grid_compute->compute_pergrid();
+        grid_compute->invoked_flag |= Compute::INVOKED_PERGRID;
       }
     }
 
