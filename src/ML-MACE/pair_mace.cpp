@@ -200,7 +200,20 @@ void PairMACE::compute(int eflag, int vflag)
   ptr[1] = n_nodes;
   weight[0] = 1.0;
 
-  // pack the input, call the model, extract the output
+  // transfer data to device
+  batch = batch.to(device);
+  cell = cell.to(device);
+  edge_index = edge_index.to(device);
+  energy = energy.to(device);
+  forces = forces.to(device);
+  node_attrs = node_attrs.to(device);
+  positions = positions.to(device);
+  ptr = ptr.to(device);
+  shifts = shifts.to(device);
+  unit_shifts = unit_shifts.to(device);
+  weight = weight.to(device);
+
+  // pack the input, call the model
   c10::Dict<std::string, torch::Tensor> input;
   input.insert("batch", batch);
   input.insert("cell", cell);
@@ -213,12 +226,12 @@ void PairMACE::compute(int eflag, int vflag)
   input.insert("shifts", shifts);
   input.insert("unit_shifts", unit_shifts);
   input.insert("weight", weight);
-  auto output = model.forward({input, mask, true, true, false}).toGenericDict();
+  auto output = model.forward({input, mask.to(device), true, true, false}).toGenericDict();
 
   // mace energy
   //   -> sum of site energies of local atoms
   if (eflag_global) {
-    auto node_energy = output.at("node_energy").toTensor();
+    auto node_energy = output.at("node_energy").toTensor().cpu();
     eng_vdwl = 0.0;
     #pragma omp parallel for reduction(+:eng_vdwl)
     for (int ii=0; ii<list->inum; ++ii) {
@@ -229,7 +242,7 @@ void PairMACE::compute(int eflag, int vflag)
 
   // mace forces
   //   -> derivatives of total mace energy
-  forces = output.at("forces").toTensor();
+  forces = output.at("forces").toTensor().cpu();
   #pragma omp parallel for
   for (int ii=0; ii<list->inum; ++ii) {
     int i = list->ilist[ii];
@@ -241,7 +254,6 @@ void PairMACE::compute(int eflag, int vflag)
   // mace site energies
   //   -> local atoms only
   if (eflag_atom) {
-    auto node_energy = output.at("node_energy").toTensor();
     #pragma omp parallel for
     for (int ii=0; ii<list->inum; ++ii) {
       int i = list->ilist[ii];
@@ -252,7 +264,7 @@ void PairMACE::compute(int eflag, int vflag)
   // mace virials (local atoms only)
   //   -> derivatives of sum of site energies of local atoms
   if (vflag_global) {
-    auto vir = output.at("virials").toTensor();
+    auto vir = output.at("virials").toTensor().cpu();
     virial[0] = vir[0][0][0].item<double>();
     virial[1] = vir[0][1][1].item<double>();
     virial[2] = vir[0][2][2].item<double>();
@@ -266,21 +278,27 @@ void PairMACE::compute(int eflag, int vflag)
   if (vflag_atom) {
     error->all(FLERR, "ERROR: pair_mace does not support vflag_atom.");
   }
-
 }
 
 /* ---------------------------------------------------------------------- */
 
 void PairMACE::settings(int narg, char **arg)
 {
-  if (narg == 1) {
-    if (strcmp(arg[0], "no_domain_decomposition") == 0) {
-      domain_decomposition = false;
-    } else {
-      error->all(FLERR, "Invalid option for pair_style mace.");
-    }
-  } else if (narg > 1) {
+  if (narg > 2) {
     error->all(FLERR, "Too many pair_style arguments for pair_style mace.");
+  }
+
+  if (narg >= 1) {
+    if (strcmp(arg[0], "gpu") == 0) {
+      device_type = "gpu";
+    }
+  }
+
+  if (narg >= 2) {
+    if (strcmp(arg[1], "no_domain_decomposition") == 0) {
+      domain_decomposition = false;
+      // TODO: add check against MPI rank
+    }
   }
 }
 
@@ -292,8 +310,17 @@ void PairMACE::coeff(int narg, char **arg)
 
   if (!allocated) allocate();
 
+  if (device_type == "cpu") {
+    device = c10::Device(torch::kCPU);
+  } else {
+    int rank;
+    MPI_Comm_rank(world, &rank);
+    std::cout << "MPI rank: " << rank << std::endl;
+    device = c10::Device(torch::kCUDA,rank);
+  }
+
   std::cout << "Loading MACE model from \"" << arg[2] << "\" ...";
-  model = torch::jit::load(arg[2]);
+  model = torch::jit::load(arg[2], device);
   std::cout << " finished." << std::endl;
 
   // extract default dtype from mace model

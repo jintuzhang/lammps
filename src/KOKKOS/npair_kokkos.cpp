@@ -240,7 +240,7 @@ void NPairKokkos<DeviceType,HALF,NEWTON,GHOST,TRI,SIZE>::build(NeighList *list_)
       // assumes newton off
 
       NPairKokkosBuildFunctorGhost<DeviceType,HALF> f(data,atoms_per_bin * 5 * sizeof(X_FLOAT) * factor);
-#ifdef LMP_KOKKOS_GPU
+#if 0
       if (ExecutionSpaceFromDevice<DeviceType>::space == Device) {
         int team_size = atoms_per_bin*factor;
         int team_size_max = Kokkos::TeamPolicy<DeviceType>(team_size,Kokkos::AUTO).team_size_max(f,Kokkos::ParallelForTag());
