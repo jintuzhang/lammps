@@ -31,7 +31,6 @@
 #include "update.h"
 
 #include <algorithm>
-#include <iostream>
 #include <stdexcept>
 
 using namespace LAMMPS_NS;
@@ -74,14 +73,12 @@ void PairMACEKokkos<DeviceType>::compute(int eflag, int vflag)
   auto d_neighbors = k_list->d_neighbors;
   auto d_ilist = k_list->d_ilist;
 
-  if (atom->nlocal != list->inum) error->all(FLERR, "ERROR: nlocal != inum.");
-  if (domain_decomposition) {
-    if (atom->nghost != list->gnum) error->all(FLERR, "ERROR: nghost != gnum.");
-  }
-
-  if (eflag_atom || vflag_atom) {
-    error->all(FLERR, "ERROR: kokkos eflag_atom not implemented.");
-  }
+  if (atom->nlocal != list->inum)
+    error->all(FLERR, "ERROR: nlocal != inum.");
+  if (domain_decomposition && (atom->nghost != list->gnum))
+    error->all(FLERR, "ERROR: nghost != gnum.");
+  if (eflag_atom || vflag_atom)
+    error->all(FLERR, "ERROR: mace/kokkos eflag_atom and/or vflag_atom not implemented.");
 
   int nlocal = atom->nlocal;
   auto r_max_squared = this->r_max_squared;
@@ -122,8 +119,8 @@ void PairMACEKokkos<DeviceType>::compute(int eflag, int vflag)
   } else {
     // normally, ghost atoms are included in the graph as independent
     // nodes, as required when the local domain does not have PBC.
-    // however, in no_domain_decomposition mode, ghost atoms are known to
-    // be shifted versions of local atoms.
+    // however, in no_domain_decomposition mode, ghost atoms are simply
+    // shifted versions of local atoms.
     n_nodes = atom->nlocal;
   }
   auto k_positions = Kokkos::View<double*[3],Kokkos::LayoutRight,DeviceType>("k_positions", n_nodes);
@@ -314,22 +311,7 @@ void PairMACEKokkos<DeviceType>::compute(int eflag, int vflag)
   input.insert("shifts", shifts);
   input.insert("unit_shifts", unit_shifts);
   input.insert("weight", weight);
-
-//std::cout << "batch" << batch.to("cpu") << std::endl;
-//std::cout << "cell" << cell.to("cpu") << std::endl;
-//std::cout << "edge_index" << edge_index.to("cpu") << std::endl;
-//std::cout << "node_attrs" << node_attrs.to("cpu") << std::endl;
-//std::cout << "positions" << positions.to("cpu") << std::endl;
-//std::cout << "ptr" << ptr.to("cpu") << std::endl;
-//std::cout << "shifts" << shifts.to("cpu") << std::endl;
-//std::cout << "unit_shifts" << unit_shifts.to("cpu") << std::endl;
-//std::cout << "weight" << weight.to("cpu") << std::endl;
-//std::cout << "mask" << mask.to("cpu") << std::endl;
-
-  auto output = model.forward({input, mask, true, true, false}).toGenericDict();
-
-//std::cout << "energy: " << output.at("energy").toTensor().to("cpu") << std::endl;
-//std::cout << "node_energy: " << output.at("node_energy").toTensor().to("cpu") << std::endl;
+  auto output = model.forward({input, mask, true, bool(vflag_global), false}).toGenericDict();
 
   // mace energy
   //   -> sum of site energies of local atoms
@@ -359,14 +341,20 @@ void PairMACEKokkos<DeviceType>::compute(int eflag, int vflag)
   // mace virials (local atoms only)
   //   -> derivatives of sum of site energies of local atoms
   if (vflag_global) {
+    // TODO: is this cpu transfer necessary?
     auto vir = output.at("virials").toTensor().to("cpu");
+    // caution: lammps does not use voigt ordering
     virial[0] = vir[0][0][0].item<double>();
     virial[1] = vir[0][1][1].item<double>();
     virial[2] = vir[0][2][2].item<double>();
-    virial[3] = 0.5*(vir[0][2][1].item<double>() + vir[0][1][2].item<double>());
+    virial[3] = 0.5*(vir[0][1][0].item<double>() + vir[0][0][1].item<double>());
     virial[4] = 0.5*(vir[0][2][0].item<double>() + vir[0][0][2].item<double>());
-    virial[5] = 0.5*(vir[0][1][0].item<double>() + vir[0][0][1].item<double>());
+    virial[5] = 0.5*(vir[0][2][1].item<double>() + vir[0][1][2].item<double>());
   }
+
+  // TODO: investigate this
+  // Appears to be important for dumps and probably more
+  atomKK->modified(execution_space,F_MASK);
 }
 
 /* ---------------------------------------------------------------------- */
