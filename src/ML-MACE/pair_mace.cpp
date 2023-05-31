@@ -231,13 +231,8 @@ void PairMACE::compute(int eflag, int vflag)
   // mace energy
   //   -> sum of site energies of local atoms
   if (eflag_global) {
-    auto node_energy = output.at("node_energy").toTensor().cpu();
-    eng_vdwl = 0.0;
-    #pragma omp parallel for reduction(+:eng_vdwl)
-    for (int ii=0; ii<list->inum; ++ii) {
-      int i = list->ilist[ii];
-      eng_vdwl += node_energy[i].item<double>();
-    }
+    energy = output.at("total_energy_local").toTensor().cpu();
+    eng_vdwl += energy.item<double>();
   }
 
   // mace forces
@@ -254,6 +249,7 @@ void PairMACE::compute(int eflag, int vflag)
   // mace site energies
   //   -> local atoms only
   if (eflag_atom) {
+    auto node_energy = output.at("node_energy").toTensor().cpu();
     #pragma omp parallel for
     for (int ii=0; ii<list->inum; ++ii) {
       int i = list->ilist[ii];
