@@ -280,18 +280,12 @@ void PairMACE::compute(int eflag, int vflag)
 
 void PairMACE::settings(int narg, char **arg)
 {
-  if (narg > 2) {
+  if (narg > 1) {
     error->all(FLERR, "Too many pair_style arguments for pair_style mace.");
   }
 
-  if (narg >= 1) {
-    if (strcmp(arg[0], "gpu") == 0) {
-      device_type = "gpu";
-    }
-  }
-
-  if (narg >= 2) {
-    if (strcmp(arg[1], "no_domain_decomposition") == 0) {
+  if (narg == 1) {
+    if (strcmp(arg[0], "no_domain_decomposition") == 0) {
       domain_decomposition = false;
       // TODO: add check against MPI rank
     }
@@ -306,12 +300,11 @@ void PairMACE::coeff(int narg, char **arg)
 
   if (!allocated) allocate();
 
-  if (device_type == "cpu") {
+  if (!torch::cuda::is_available()) {
     device = c10::Device(torch::kCPU);
   } else {
     int rank;
     MPI_Comm_rank(world, &rank);
-    std::cout << "MPI rank: " << rank << std::endl;
     device = c10::Device(torch::kCUDA,rank);
   }
 

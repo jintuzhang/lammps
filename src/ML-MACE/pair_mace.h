@@ -47,7 +47,6 @@ class PairMACE : public Pair {
 
  protected:
 
-  std::string device_type = "cpu";
   bool domain_decomposition = true;
   torch::Device device = torch::kCPU;
   torch::jit::script::Module model;
