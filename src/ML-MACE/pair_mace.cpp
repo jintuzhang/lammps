@@ -226,7 +226,7 @@ void PairMACE::compute(int eflag, int vflag)
   input.insert("shifts", shifts);
   input.insert("unit_shifts", unit_shifts);
   input.insert("weight", weight);
-  auto output = model.forward({input, mask.to(device), true, true, false}).toGenericDict();
+  auto output = model.forward({input, mask.to(device), bool(vflag_global)}).toGenericDict();
 
   // mace energy
   //   -> sum of site energies of local atoms
