@@ -301,8 +301,10 @@ void PairMACE::coeff(int narg, char **arg)
   if (!allocated) allocate();
 
   if (!torch::cuda::is_available()) {
+    std::cout << "CUDA unavailable, setting device type to torch::kCPU." << std::endl;
     device = c10::Device(torch::kCPU);
   } else {
+    std::cout << "CUDA found, setting device type to torch::kCUDA." << std::endl;
     int rank;
     MPI_Comm_rank(world, &rank);
     device = c10::Device(torch::kCUDA,rank);
