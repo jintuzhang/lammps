@@ -331,11 +331,11 @@ void PairMACEKokkos<DeviceType>::compute(int eflag, int vflag)
   forces = output.at("forces").toTensor();
   auto forces_ptr = static_cast<double*>(forces.data_ptr());
   auto k_forces = Kokkos::View<double*[3],Kokkos::LayoutRight,DeviceType,Kokkos::MemoryTraits<Kokkos::Unmanaged>>(forces_ptr,n_nodes);
-  Kokkos::parallel_for("PairMACEKokkos: Extract k_forces.", nlocal, KOKKOS_LAMBDA(const int ii) {
+  Kokkos::parallel_for("PairMACEKokkos: Extract k_forces.", n_nodes, KOKKOS_LAMBDA(const int ii) {
     const int i = d_ilist(ii);
-    f(i,0) = k_forces(i,0);
-    f(i,1) = k_forces(i,1);
-    f(i,2) = k_forces(i,2);
+    f(i,0) += k_forces(i,0);
+    f(i,1) += k_forces(i,1);
+    f(i,2) += k_forces(i,2);
   });
 
   // mace virials (local atoms only)
@@ -344,12 +344,12 @@ void PairMACEKokkos<DeviceType>::compute(int eflag, int vflag)
     // TODO: is this cpu transfer necessary?
     auto vir = output.at("virials").toTensor().to("cpu");
     // caution: lammps does not use voigt ordering
-    virial[0] = vir[0][0][0].item<double>();
-    virial[1] = vir[0][1][1].item<double>();
-    virial[2] = vir[0][2][2].item<double>();
-    virial[3] = 0.5*(vir[0][1][0].item<double>() + vir[0][0][1].item<double>());
-    virial[4] = 0.5*(vir[0][2][0].item<double>() + vir[0][0][2].item<double>());
-    virial[5] = 0.5*(vir[0][2][1].item<double>() + vir[0][1][2].item<double>());
+    virial[0] += vir[0][0][0].item<double>();
+    virial[1] += vir[0][1][1].item<double>();
+    virial[2] += vir[0][2][2].item<double>();
+    virial[3] += 0.5*(vir[0][1][0].item<double>() + vir[0][0][1].item<double>());
+    virial[4] += 0.5*(vir[0][2][0].item<double>() + vir[0][0][2].item<double>());
+    virial[5] += 0.5*(vir[0][2][1].item<double>() + vir[0][1][2].item<double>());
   }
 
   // TODO: investigate this
