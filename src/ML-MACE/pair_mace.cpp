@@ -239,11 +239,11 @@ void PairMACE::compute(int eflag, int vflag)
   //   -> derivatives of total mace energy
   forces = output.at("forces").toTensor().cpu();
   #pragma omp parallel for
-  for (int ii=0; ii<list->inum; ++ii) {
+  for (int ii=0; ii<n_nodes; ++ii) {
     int i = list->ilist[ii];
-    atom->f[i][0] = forces[i][0].item<double>();
-    atom->f[i][1] = forces[i][1].item<double>();
-    atom->f[i][2] = forces[i][2].item<double>();
+    atom->f[i][0] += forces[i][0].item<double>();
+    atom->f[i][1] += forces[i][1].item<double>();
+    atom->f[i][2] += forces[i][2].item<double>();
   }
 
   // mace site energies
@@ -261,12 +261,12 @@ void PairMACE::compute(int eflag, int vflag)
   //   -> derivatives of sum of site energies of local atoms
   if (vflag_global) {
     auto vir = output.at("virials").toTensor().cpu();
-    virial[0] = vir[0][0][0].item<double>();
-    virial[1] = vir[0][1][1].item<double>();
-    virial[2] = vir[0][2][2].item<double>();
-    virial[3] = 0.5*(vir[0][1][0].item<double>() + vir[0][0][1].item<double>());
-    virial[4] = 0.5*(vir[0][2][0].item<double>() + vir[0][0][2].item<double>());
-    virial[5] = 0.5*(vir[0][2][1].item<double>() + vir[0][1][2].item<double>());
+    virial[0] += vir[0][0][0].item<double>();
+    virial[1] += vir[0][1][1].item<double>();
+    virial[2] += vir[0][2][2].item<double>();
+    virial[3] += 0.5*(vir[0][1][0].item<double>() + vir[0][0][1].item<double>());
+    virial[4] += 0.5*(vir[0][2][0].item<double>() + vir[0][0][2].item<double>());
+    virial[5] += 0.5*(vir[0][2][1].item<double>() + vir[0][1][2].item<double>());
   }
 
   // mace site virials
