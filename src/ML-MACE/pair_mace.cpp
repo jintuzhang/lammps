@@ -307,8 +307,6 @@ void PairMACE::coeff(int narg, char **arg)
     device = c10::Device(torch::kCPU);
   } else {
     std::cout << "CUDA found, setting device type to torch::kCUDA." << std::endl;
-    //int worldrank;
-    //MPI_Comm_rank(world, &worldrank);
     MPI_Comm local;
     MPI_Comm_split_type(world, MPI_COMM_TYPE_SHARED, 0, MPI_INFO_NULL, &local);
     int localrank;
