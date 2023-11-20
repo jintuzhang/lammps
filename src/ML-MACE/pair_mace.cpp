@@ -288,6 +288,8 @@ void PairMACE::settings(int narg, char **arg)
     if (strcmp(arg[0], "no_domain_decomposition") == 0) {
       domain_decomposition = false;
       // TODO: add check against MPI rank
+    } else {
+      error->all(FLERR, "Unrecognized argument for pair_style mace.");
     }
   }
 }
