@@ -25,6 +25,7 @@
 #include "memory.h"
 #include "neigh_list.h"
 #include "neighbor.h"
+#include "universe.h"
 
 #include <algorithm>
 #include <iostream>
@@ -308,7 +309,7 @@ void PairMACE::coeff(int narg, char **arg)
     //int worldrank;
     //MPI_Comm_rank(world, &worldrank);
     MPI_Comm local;
-    MPI_Comm_split_type(world, MPI_COMM_TYPE_SHARED, 0, MPI_INFO_NULL, &local);
+    MPI_Comm_split_type(universe->uworld, MPI_COMM_TYPE_SHARED, 0, MPI_INFO_NULL, &local);
     int localrank;
     MPI_Comm_rank(local, &localrank);
     device = c10::Device(torch::kCUDA,localrank);
