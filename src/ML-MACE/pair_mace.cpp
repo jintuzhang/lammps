@@ -27,6 +27,7 @@
 #include "neighbor.h"
 #include "universe.h"
 
+#include <cuda_runtime.h>
 #include <algorithm>
 #include <iostream>
 #include <stdexcept>
@@ -312,7 +313,9 @@ void PairMACE::coeff(int narg, char **arg)
     MPI_Comm_split_type(universe->uworld, MPI_COMM_TYPE_SHARED, 0, MPI_INFO_NULL, &local);
     int localrank;
     MPI_Comm_rank(local, &localrank);
-    device = c10::Device(torch::kCUDA,localrank);
+    int nDevices;
+    cudaGetDeviceCount(&nDevices);
+    device = c10::Device(torch::kCUDA,localrank % nDevices);
   }
 
   std::cout << "Loading MACE model from \"" << arg[2] << "\" ...";
