@@ -167,16 +167,6 @@ void PairMACE::compute(int eflag, int vflag)
   }
 
   // ----- node_attrs -----
-  // node_attrs is one-hot encoding for atomic numbers
-  auto mace_type = [this](int lammps_type) {
-    for (int i=0; i<mace_atomic_numbers.size(); ++i) {
-      if (mace_atomic_numbers[i]==lammps_atomic_numbers[lammps_type-1]) {
-        return i+1;
-      }
-    }
-    error->all(FLERR, "ERROR: problem converting lammps_type to mace_type.");
-    return -1;
-  };
   int n_node_feats = mace_atomic_numbers.size();
   auto node_attrs = torch::zeros({n_nodes,n_node_feats}, torch_float_dtype);
   #pragma omp parallel for
@@ -290,6 +280,8 @@ void PairMACE::settings(int narg, char **arg)
     if (strcmp(arg[0], "no_domain_decomposition") == 0) {
       domain_decomposition = false;
       // TODO: add check against MPI rank
+    } else {
+      error->all(FLERR, "Unrecognized argument for pair_style mace.");
     }
   }
 }
@@ -307,8 +299,6 @@ void PairMACE::coeff(int narg, char **arg)
     device = c10::Device(torch::kCPU);
   } else {
     std::cout << "CUDA found, setting device type to torch::kCUDA." << std::endl;
-    //int worldrank;
-    //MPI_Comm_rank(world, &worldrank);
     MPI_Comm local;
     MPI_Comm_split_type(universe->uworld, MPI_COMM_TYPE_SHARED, 0, MPI_INFO_NULL, &local);
     int localrank;
@@ -347,7 +337,7 @@ void PairMACE::coeff(int narg, char **arg)
   for (int i=0; i<a_n.size(0); ++i) {
     mace_atomic_numbers.push_back(a_n[i].item<int64_t>());
   }
-  std::cout << "  - The model atomic numbers are: " << mace_atomic_numbers << "." << std::endl;
+  std::cout << "  - The MACE model atomic numbers are: " << mace_atomic_numbers << "." << std::endl;
 
   // extract atomic numbers from pair_coeff
   for (int i=3; i<narg; ++i) {
@@ -356,6 +346,11 @@ void PairMACE::coeff(int narg, char **arg)
     lammps_atomic_numbers.push_back(index);
   }
   std::cout << "  - The pair_coeff atomic numbers are: " << lammps_atomic_numbers << "." << std::endl;
+
+  for (int i=1; i<=lammps_atomic_numbers.size(); ++i) {
+    std::cout << "  - Mapping LAMMPS type " << i << " (" << periodic_table[i-1]
+      << ") to MACE type " << mace_type(i) << "." << std::endl;
+  }
 
   for (int i=1; i<atom->ntypes+1; i++)
     for (int j=i; j<atom->ntypes+1; j++)
@@ -400,3 +395,14 @@ void PairMACE::allocate()
 
   memory->create(cutsq, atom->ntypes+1, atom->ntypes+1, "pair:cutsq");
 }
+
+int PairMACE::mace_type(int lammps_type)
+{
+    for (int i=0; i<mace_atomic_numbers.size(); ++i) {
+      if (mace_atomic_numbers[i]==lammps_atomic_numbers[lammps_type-1]) {
+        return i+1;
+      }
+    }
+    error->all(FLERR, "Problem converting lammps_type to mace_type.");
+    return -1;
+ }

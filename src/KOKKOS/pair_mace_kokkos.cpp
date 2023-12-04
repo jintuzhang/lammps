@@ -374,7 +374,7 @@ void PairMACEKokkos<DeviceType>::coeff(int narg, char **arg)
   Kokkos::deep_copy(k_lammps_atomic_numbers, k_lammps_atomic_numbers_mirror);
   k_mace_atomic_numbers = Kokkos::View<int64_t*,DeviceType>("k_mace_atomic_numbers",mace_atomic_numbers.size());
   auto k_mace_atomic_numbers_mirror = Kokkos::create_mirror_view(k_mace_atomic_numbers);
-  for (int i=0; i<lammps_atomic_numbers.size(); ++i) {
+  for (int i=0; i<mace_atomic_numbers.size(); ++i) {
     k_mace_atomic_numbers_mirror(i) = mace_atomic_numbers[i];
   }
   Kokkos::deep_copy(k_mace_atomic_numbers, k_mace_atomic_numbers_mirror);
