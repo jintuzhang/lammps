@@ -344,7 +344,8 @@ void PairMACE::coeff(int narg, char **arg)
   std::cout << "  - The pair_coeff atomic numbers are: " << lammps_atomic_numbers << "." << std::endl;
 
   for (int i=1; i<=lammps_atomic_numbers.size(); ++i) {
-    std::cout << "  - Mapping LAMMPS type " << i << " (" << periodic_table[i-1]
+    std::cout << "  - Mapping LAMMPS type " << i
+      << " (" << periodic_table[lammps_atomic_numbers[i-1]-1]
       << ") to MACE type " << mace_type(i) << "." << std::endl;
   }
 
